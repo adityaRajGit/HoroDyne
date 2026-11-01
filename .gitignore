@@ -1,0 +1,14 @@
+
+# AI assistant artifacts
+state.md
+.tools/
+test/*.exe
+.remember/
+.claude/
+session-log.md
+
+# Valorax licence does not allow redistribution: generate these locally (see README)
+Horodyne/font_vx_*.c
+
+# 10 MB mesh made from Waveshare's board model
+case/ref/module.stl
