@@ -247,7 +247,7 @@ Serial runs at 115200 baud. Boot lines start with `horodyne:`, `imu:`, `rtc:` an
 
 ## Contributing
 
-Issues and pull requests are welcome. Before you open a pull request:
+Issues and pull requests are welcome. `main` is protected, so every change goes through a pull request that the maintainer reviews and merges. Before you open one:
 
 - Run `sh test/run_tests.sh`.
 - Keep hardware access in `hal_*`, so the UI stays testable.
