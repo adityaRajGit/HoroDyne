@@ -1,6 +1,6 @@
 # Horodyne watch UI — design spec
 
-Date: 2026-10-10 · Status: approved design (font change applied) · Review page: https://claude.ai/artifact/1144rMJj79hpPYZEYEDxy5
+Date: 2026-10-10 · Status: approved design (font change applied)
 
 ## 1. Goal
 

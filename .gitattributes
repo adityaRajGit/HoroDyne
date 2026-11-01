@@ -1,0 +1,3 @@
+# sh cannot run CRLF scripts, and build.sh reads the build number out of build_info.h
+*.sh text eol=lf
+Horodyne/build_info.h text eol=lf

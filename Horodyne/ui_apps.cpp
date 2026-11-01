@@ -388,7 +388,7 @@ RefreshFn buildSettings(lv_obj_t *s) {
             rowSwitch[i] = uiSwitch(row, 210, 12, false);
         } else {
             rowValue[i] = rightLabel(row, &font_small, COL_GREY, 100, 18, 156);
-            lv_label_set_long_mode(rowValue[i], LV_LABEL_LONG_DOT);
+            uiDots(rowValue[i], 156);
         }
     }
     return settingsRefresh;
@@ -409,7 +409,7 @@ RefreshFn buildAbout(lv_obj_t *s) {
     lv_obj_add_flag(list, LV_OBJ_FLAG_GESTURE_BUBBLE);
 
     char chip[32], mem[32], bat[16], ram[16];
-    snprintf(chip, sizeof(chip), "%s REV %u, %lu MHZ", ESP.getChipModel(), ESP.getChipRevision(),
+    snprintf(chip, sizeof(chip), "%s R%u %lu MHZ", ESP.getChipModel(), ESP.getChipRevision(),
              (unsigned long)ESP.getCpuFreqMHz());
     snprintf(mem, sizeof(mem), "%lu MB + %lu MB PSRAM", (unsigned long)(ESP.getFlashChipSize() >> 20),
              (unsigned long)(ESP.getPsramSize() >> 20));
@@ -419,7 +419,7 @@ RefreshFn buildAbout(lv_obj_t *s) {
         { "VERSION",   VERSION_TEXT },
         { "BUILT",     BUILD_STAMP },
         { "DEVELOPER", "SENJU" },
-        { "BOARD",     "WAVESHARE ESP32-S3 1.69\"" },
+        { "BOARD",     "WAVESHARE 1.69\"" },
         { "CHIP",      chip },
         { "FLASH",     mem },
         { "SCREEN",    "ST7789 280X240" },
@@ -433,7 +433,7 @@ RefreshFn buildAbout(lv_obj_t *s) {
         lv_obj_t *row = uiBox(list, 0, 0, SCREEN_W, 34);
         uiLabel(row, &font_small, COL_GREY, 24, 8, r[0]);
         lv_obj_t *v = rightLabel(row, &font_small, COL_TEXT, 96, 8, 160);
-        lv_label_set_long_mode(v, LV_LABEL_LONG_DOT);
+        uiDots(v, 160);
         uiSetText(v, r[1]);
     }
     return aboutRefresh;

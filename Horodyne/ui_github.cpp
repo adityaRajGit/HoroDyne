@@ -109,8 +109,7 @@ static lv_obj_t *scroller(lv_obj_t *s, int y, int h) {
 
 static lv_obj_t *dotLabel(lv_obj_t *p, const lv_font_t *f, uint32_t c, int x, int y, int w, const char *t) {
     lv_obj_t *l = uiLabel(p, f, c, x, y, t);
-    lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(l, w);
+    uiDots(l, w);
     return l;
 }
 

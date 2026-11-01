@@ -37,6 +37,11 @@ lv_obj_t *uiLabel(lv_obj_t *parent, const lv_font_t *font, uint32_t color, int x
     return l;
 }
 
+void uiDots(lv_obj_t *l, int w) {
+    lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
+    lv_obj_set_size(l, w, lv_font_get_line_height(lv_obj_get_style_text_font(l, LV_PART_MAIN)));
+}
+
 lv_obj_t *uiCircle(lv_obj_t *parent, int cx, int cy, int d, uint32_t color, int border) {
     lv_obj_t *o = uiBox(parent, cx - d / 2, cy - d / 2, d, d);
     lv_obj_set_style_radius(o, LV_RADIUS_CIRCLE, 0);
