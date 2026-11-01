@@ -10,5 +10,9 @@ session-log.md
 # Valorax licence does not allow redistribution: generate these locally (see README)
 Horodyne/font_vx_*.c
 
+# build.sh output
+/build/
+
 # 10 MB mesh made from Waveshare's board model
 case/ref/module.stl
+context-snapshot.json

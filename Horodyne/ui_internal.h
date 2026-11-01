@@ -16,16 +16,24 @@ LV_FONT_DECLARE(font_value);   // 40 px digits , . K ° % -
 LV_FONT_DECLARE(font_label);   // 22 px ASCII
 LV_FONT_DECLARE(font_small);   // 16 px ASCII
 // Space Mono, clock face only (SpaceMono-OFL.txt)
-LV_FONT_DECLARE(font_vx_time);  // 64 px Valorax digits - (personal-use licence: .tools/fonts/valorax)
-LV_FONT_DECLARE(font_vx_num);   // 22 px Valorax digits , - A M P
 LV_FONT_DECLARE(font_sm_label); // 20 px ASCII
 LV_FONT_DECLARE(font_sm_small); // 14 px ASCII + °
+// Valorax, clock face only. Its personal-use licence keeps the generated files out of the repo, so a
+// plain clone builds with Unica One instead (README > Fonts shows how to add Valorax).
+#if __has_include("font_vx_time.c")
+LV_FONT_DECLARE(font_vx_time);  // 64 px digits -
+LV_FONT_DECLARE(font_vx_num);   // 22 px digits , - A M P
+#else
+#define font_vx_time font_hero
+#define font_vx_num  font_label
+#endif
 
 // ----- building blocks -----------------------------------------------------
 lv_obj_t *uiScreen();                                        // black, not scrollable, swipe handler attached
 lv_obj_t *uiBox(lv_obj_t *parent, int x, int y, int w, int h);  // invisible container
 lv_obj_t *uiButton(lv_obj_t *parent, int x, int y, int w, int h, lv_event_cb_t cb, void *data);
 lv_obj_t *uiLabel(lv_obj_t *parent, const lv_font_t *font, uint32_t color, int x, int y, const char *text);
+void      uiDots(lv_obj_t *label, int w);   // one line cut with dots: without a fixed height LVGL wraps instead
 lv_obj_t *uiCircle(lv_obj_t *parent, int cx, int cy, int d, uint32_t color, int border);  // border 0 = filled
 lv_obj_t *uiRect(lv_obj_t *parent, int x, int y, int w, int h, uint32_t color, int radius);
 lv_obj_t *uiRing(lv_obj_t *parent, int x, int y, int d, int width, uint32_t color, int permille);

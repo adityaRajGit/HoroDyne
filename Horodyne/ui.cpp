@@ -47,8 +47,7 @@ lv_obj_t *uiScreen() {
 
 void uiHeader(lv_obj_t *scr, const char *title, uint32_t color) {
     lv_obj_t *t = uiLabel(scr, &font_small, color, 24, 12, title);
-    lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(t, 170);
+    uiDots(t, 170);
     char b[8];
     clockTimeText(b, sizeof(b));
     hdrTime = uiLabel(scr, &font_small, COL_TEXT, 0, 0, b);
@@ -272,8 +271,8 @@ static RefreshFn buildFace(lv_obj_t *s) {
     // Time: hour over minutes, right-aligned in the right half.
     fHour = uiLabel(s, &font_vx_time, COL_FACE, 0, 0, "--");
     lv_obj_align(fHour, LV_ALIGN_TOP_RIGHT, -18, 62);
-    fAmPm = uiLabel(s, &font_vx_num, COL_FACE, 0, 0, "");   // above the hour, same right edge
-    lv_obj_align(fAmPm, LV_ALIGN_TOP_RIGHT, -18, 46);
+    fAmPm = uiLabel(s, &font_vx_num, COL_FACE, 0, 0, "");   // on top of the hour, same right edge, in either font
+    lv_obj_align(fAmPm, LV_ALIGN_TOP_RIGHT, -18, 62 - font_vx_num.line_height + font_vx_num.base_line);
     fMin = uiLabel(s, &font_vx_time, COL_TEXT, 0, 0, "--");
     lv_obj_align(fMin, LV_ALIGN_TOP_RIGHT, -18, 124);
 
@@ -301,7 +300,7 @@ static void openFromStack(lv_event_t *) { uiOpenApp(STACK_APPS[uiStackIndex], SC
 
 static lv_obj_t *cardText(lv_obj_t *card, int x, int y, const lv_font_t *f, uint32_t c, const char *t, int w) {
     lv_obj_t *l = uiLabel(card, f, c, x, y, t);
-    if (w) { lv_label_set_long_mode(l, LV_LABEL_LONG_DOT); lv_obj_set_width(l, w); }
+    if (w) uiDots(l, w);
     return l;
 }
 
@@ -315,7 +314,7 @@ static void fillCard(lv_obj_t *card, uint8_t idx, bool full) {
         cardText(card, 128, 50, &font_value, COL_TEXT, b, 0);
         char g[12]; fmtThousands(g, sizeof(g), settings.stepGoal);
         snprintf(b, sizeof(b), "OF %s STEPS", g);
-        cardText(card, 128, 96, &font_small, COL_GREY, b, 104);
+        lv_obj_set_width(cardText(card, 128, 96, &font_small, COL_GREY, b, 0), 104);   // two lines on purpose
     } else if (idx == 1) {
         if (full) {
             lv_obj_t *ib = uiBox(card, 18, 42, 64, 64);
@@ -440,7 +439,6 @@ static void openFromGrid(lv_event_t *e) {
 
 static void gridIcon(lv_obj_t *s, int cx, int top, ScreenId app, uint32_t color, const char *name) {
     lv_obj_t *b = uiButton(s, cx - 35, top, 70, 88, openFromGrid, (void *)(uintptr_t)app);
-    lv_obj_add_flag(b, LV_OBJ_FLAG_OVERFLOW_VISIBLE);   // "STOPWATCH" is wider than its button
     uiCircle(b, 35, 28, 56, color, 0);
     lv_obj_t *ib = uiBox(b, 19, 12, 32, 32);
     switch (app) {
@@ -454,6 +452,7 @@ static void gridIcon(lv_obj_t *s, int cx, int top, ScreenId app, uint32_t color,
         default:           iconGear(ib, 0, 0, 32, 0x000000); break;
     }
     lv_obj_t *l = uiLabel(b, &font_small, COL_TEXT, 0, 0, name);
+    lv_obj_set_style_text_letter_space(l, 0, 0);   // "STOPWATCH" only fits the 70 px column without it
     lv_obj_align(l, LV_ALIGN_TOP_MID, 0, 62);
 }
 
