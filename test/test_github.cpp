@@ -16,7 +16,7 @@ static const char REPLY[] = R"({"data":{
   {"number":8,"title":"Red","updatedAt":"2026-10-30T00:00:00Z","repository":{"name":"x"},"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"FAILURE","contexts":{"totalCount":2}}}}]}}
  ]},
  "merged":{"issueCount":12,"nodes":[{"number":477,"title":"NTP","updatedAt":"2026-10-31T00:00:00Z","mergedAt":"2026-10-30T12:00:00Z","repository":{"name":"horodyne"}}]},
- "review":{"issueCount":2},
+ "review":{"issueCount":2,"nodes":[{"number":12,"title":"Look at this","updatedAt":"2026-10-29T00:00:00Z","repository":{"name":"x"}}]},
  "user":{"contributionsCollection":{"contributionCalendar":{"weeks":[
    {"contributionDays":[{"contributionCount":9},{"contributionCount":9}]},
    {"contributionDays":[{"contributionCount":1},{"contributionCount":0},{"contributionCount":0},{"contributionCount":1},{"contributionCount":2},{"contributionCount":0},{"contributionCount":1}]},
@@ -30,6 +30,7 @@ static const char REPLY[] = R"({"data":{
      {"name":"release","status":"QUEUED","conclusion":null},
      {"name":"bad","status":"COMPLETED","conclusion":"FAILURE","startedAt":"2026-11-01T07:00:00Z","completedAt":"2026-11-01T07:00:01Z"}
    ]}}]}}}},
+   {"name":"queued","defaultBranchRef":{"name":"main","target":{"checkSuites":{"nodes":[{"status":"QUEUED","conclusion":null,"updatedAt":"2026-10-01T00:00:00Z","checkRuns":{"nodes":[]}}]}}}},
    {"name":"empty","defaultBranchRef":null},
    {"name":"nosuite","defaultBranchRef":{"name":"main","target":{"checkSuites":{"nodes":[]}}}}
   ]}}}})";
@@ -59,7 +60,10 @@ int main() {
     assert(g.weekTotal == 3 + 0 + 1 + 2 + 4 + 5 + 0);
     assert(g.streak == 4);                     // empty today skipped: 5, 4, 2, 1 then a zero
 
-    assert(g.runCount == 2);                   // repos with no suite are skipped
+    assert(g.reviewShown == 1 && g.review[0].number == 12);
+
+    assert(g.runCount == 3);                   // repos with no suite are skipped
+    assert(g.runs[2].state == GH_RUN);         // queued run: in progress, though a queued job stays waiting
     assert(!strcmp(g.runs[1].name, "Build firmware") && g.runs[1].number == 1042);
     assert(g.runs[1].state == GH_RUN && g.runs[1].jobCount == 4);
     assert(g.runs[1].jobs[0].state == GH_PASS && g.runs[1].jobs[0].secs == 21);
@@ -74,6 +78,9 @@ int main() {
     assert(!strcmp(g.commits[0].message, "Fix USB offset"));   // first line only
 
     assert(ghParseTime("2026-11-01T07:30:00Z") == 1793518200);
+    assert(ghParseTime("2026-11-01T13:00:00+05:30") == 1793518200);   // same instant, IST
+    assert(ghParseTime("2026-11-01T02:30:00-05:00") == 1793518200);
+    assert(ghParseTime("2026-11-01T07:30:00") == 1793518200);
     assert(ghParseTime("garbage") == 0 && ghParseTime(nullptr) == 0);
     assert(ghValidLogin("senju-dev") && !ghValidLogin("a b") && !ghValidLogin("x\" is:public") && !ghValidLogin("") && !ghValidLogin("-a"));
 

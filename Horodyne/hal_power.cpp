@@ -4,6 +4,7 @@
 #include <esp_sleep.h>
 #include <driver/gpio.h>
 #include <driver/usb_serial_jtag.h>
+#include <esp_task_wdt.h>
 
 static bool     ignoreUntilRelease = true;  // PWR is still held from switching the watch on
 static bool     wasDown = false;
@@ -71,13 +72,13 @@ PwrEvent powerPoll() {
 // The wake that brought the screen on already used this press.
 static void swallowPress() { ignoreUntilRelease = true; clicks = 0; }
 
-WakeReason powerLightSleep(uint64_t timerUs, bool imuWake) {
+WakeReason powerLightSleep(uint64_t timerUs, bool imuWake, bool stayAwake) {
     // The IMU wake-on-motion line toggles, so wake on whichever level it is NOT at now.
     int imuLevel = digitalRead(PIN_IMU_INT);
 
     // On a computer's USB, or while debugging: same wake rules, but polled, so USB stays
     // connected for uploads and the serial log. Battery life doesn't matter on USB power.
-    if (DEBUG_NO_SLEEP || usb_serial_jtag_is_connected()) {
+    if (stayAwake || DEBUG_NO_SLEEP || usb_serial_jtag_is_connected()) {
         uint32_t t0 = millis();
         while (true) {
             if (powerKeyDown()) { swallowPress(); return WAKE_PWR; }
@@ -86,7 +87,7 @@ WakeReason powerLightSleep(uint64_t timerUs, bool imuWake) {
             uint64_t elapsedUs = (uint64_t)(millis() - t0) * 1000ULL;
             if (timerUs && elapsedUs >= timerUs) return WAKE_TIMER;
             batterySerialPoll();
-            if (!DEBUG_NO_SLEEP && !usb_serial_jtag_is_connected()) {   // unplugged: really sleep
+            if (!stayAwake && !DEBUG_NO_SLEEP && !usb_serial_jtag_is_connected()) {   // unplugged: really sleep
                 if (timerUs) timerUs -= elapsedUs;
                 break;
             }
@@ -124,6 +125,7 @@ void powerOff() {
     digitalWrite(PIN_SYS_EN, LOW);
     delay(300);
     // Still running, so USB is powering the board. Sleep until PWR is held for 2 s, then reboot.
+    esp_task_wdt_delete(NULL);   // this wait has no end for the watchdog to see
     while (true) {
         while (powerKeyDown()) delay(10);
         powerLightSleep(0, false);

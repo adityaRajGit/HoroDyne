@@ -51,13 +51,13 @@
 | Part | Notes |
 |---|---|
 | [Waveshare ESP32-S3-Touch-LCD-1.69](https://docs.waveshare.com/ESP32-S3-Touch-LCD-1.69) | ESP32-S3 with 16 MB flash and 8 MB PSRAM, ST7789V2 LCD used in landscape (280 × 240), CST816T touch, QMI8658 motion sensor, PCF85063 clock chip |
-| Single-cell LiPo | Optional: the watch also runs from USB. Check the plug fits the board's socket and that red goes to `+`, because generic cells often have a different plug or reversed polarity. |
+| Single-cell LiPo | Optional: the watch also runs from USB. Developed with a PL432224 cell, treated as 400 mAh (label: 3.87 V, 1.08 Wh, which works out to about 280 mAh). Check the plug fits the board's socket and that red goes to `+`, because generic cells often have a different plug or reversed polarity. |
 | Case and 20 mm strap | Optional. See [Case](#case). |
 
 > [!WARNING]
 > **Don't connect a small cell and then plug in USB.** Schematic V2.1 and the ETA6098 datasheet show R25 (82 kΩ) setting the charge current to about 2 A. This hasn't been measured, and the current you actually get also depends on the USB source. Charging starts as soon as USB power is present, and neither firmware nor powering off the watch can limit or stop it, because the charger sits ahead of the power switch. The board also has no battery temperature sensor.
 >
-> Check the maximum charge current on your cell's datasheet. A 2 A charge is about 2C for a 1000 mAh cell and about 7C for a 280 mAh cell, well beyond what small cells are normally rated for. If your cell can't take it, remove it from the board and charge it with a suitable single-cell LiPo charger.
+> Check the maximum charge current on your cell's datasheet. A 2 A charge is about 5C for a 400 mAh cell and about 7C for a 280 mAh cell, well beyond what small cells are normally rated for. If your cell can't take it, remove it from the board and charge it with a suitable single-cell LiPo charger.
 
 ## Install a release
 

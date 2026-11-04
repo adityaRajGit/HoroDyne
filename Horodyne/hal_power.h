@@ -13,4 +13,5 @@ bool     powerKeyDown();
 void     buzzerSet(bool on);  // passive buzzer tone on/off; cheap to call every loop
 // Light sleep until touch, PWR, IMU interrupt, or the timer.
 // imuWake=false skips the IMU as a wake source (used for the raise cooldown).
-WakeReason powerLightSleep(uint64_t timerUs, bool imuWake);
+// stayAwake=true waits for the same events without sleeping (Wi-Fi in use).
+WakeReason powerLightSleep(uint64_t timerUs, bool imuWake, bool stayAwake = false);

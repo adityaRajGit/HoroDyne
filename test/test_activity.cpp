@@ -21,7 +21,9 @@ int imuReadSamples(float *g, int max) {
     fifoHead += n;
     return n;
 }
-int  clockDayOfYear() { return day; }
+int  clockDayNumber() { return day; }
+static bool jump = false;
+bool clockTakeJump() { bool j = jump; jump = false; return j; }
 int  clockHour() { return hour; }
 
 // Wrist |a| while walking: one swing of ~0.3 g per step at 1.8 steps/s. Still: 1 g with a little noise.
@@ -58,6 +60,12 @@ int main() {
     // ...later ones go to the new block.
     still(3); walk(8); still(3); drain();
     assert(activity.steps == 45 && activity.bins[5] == 8);
+
+    // A clock correction that changes the date keeps the day's steps.
+    day = 105; jump = true; activityUpdate();
+    assert(activity.steps == 45);
+    day = 100; jump = true; activityUpdate();
+    assert(activity.steps == 45);
 
     // Midnight: the new day starts at zero.
     still(1); day = 101; hour = 0; drain();

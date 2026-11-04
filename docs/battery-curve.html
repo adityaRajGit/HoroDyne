@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Horodyne Battery Curve</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Bench-instrument sheet: one chart with a reading tool beside it, the full lookup table below. */
+:root {
+  --bg: #f3f4f1; --surface: #ffffff; --ink: #1c211f; --muted: #5d6662; --line: #d9ddd8;
+  --rest: #1f6fb2; --charge: #b8540f;
+  --warn: #a86a00; --low: #b8540f; --off: #c0262d;
+  --sans: "IBM Plex Sans", "Segoe UI", sans-serif; --mono: "IBM Plex Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  color-scheme: dark; --bg: #121513; --surface: #1b1f1d; --ink: #edf0ed; --muted: #a0a9a4; --line: #333a36;
+  --rest: #4a98dc; --charge: #d9752a; --warn: #e3b341; --low: #d9752a; --off: #f47a7f;
+} }
+:root[data-theme="dark"] {
+  color-scheme: dark; --bg: #121513; --surface: #1b1f1d; --ink: #edf0ed; --muted: #a0a9a4; --line: #333a36;
+  --rest: #4a98dc; --charge: #d9752a; --warn: #e3b341; --low: #d9752a; --off: #f47a7f;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 var(--sans); }
+main { max-width: 1040px; margin: 0 auto; padding: 32px 20px 56px; display: grid; gap: 24px; }
+h1 { margin: 0; font-size: 30px; line-height: 1.2; font-weight: 600; text-wrap: balance; }
+h2 { margin: 0 0 12px; font-size: 18px; font-weight: 600; }
+p { margin: 0; max-width: 68ch; }
+.lead { color: var(--muted); margin-top: 8px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 20px; min-width: 0; }
+.top { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 24px; align-items: start; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 14px; color: var(--muted); margin-bottom: 8px; }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.legend i { width: 18px; height: 0; border-top: 2px solid var(--rest); }
+.legend i.c { border-top: 2px dashed var(--charge); }
+svg { display: block; width: 100%; height: auto; font-family: var(--mono); touch-action: none; }
+.tip { font-size: 13px; }
+.field { display: grid; gap: 4px; margin-bottom: 14px; font-size: 14px; color: var(--muted); }
+input[type=range] { width: 100%; accent-color: var(--rest); }
+input[type=number] { width: 100%; padding: 7px 8px; font: 15px var(--mono); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; }
+.seg { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 14px; }
+.seg button { padding: 8px; font: 500 14px var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; cursor: pointer; }
+.seg button[aria-pressed=true] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+:focus-visible { outline: 2px solid var(--rest); outline-offset: 2px; }
+.big { font: 500 52px/1 var(--mono); font-variant-numeric: tabular-nums; }
+.state { display: inline-block; margin: 8px 0 12px; padding: 2px 9px; border: 1px solid currentColor; border-radius: 3px; font-size: 13px; font-weight: 500; }
+dl { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 3px 12px; font-size: 14px; }
+dt { color: var(--muted); } dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+th { text-align: right; font-weight: 500; color: var(--muted); padding: 6px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { text-align: right; font-family: var(--mono); padding: 5px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th:last-child, td:last-child { text-align: left; font-family: var(--sans); }
+tr.mark td:last-child { font-weight: 500; }
+.notes { display: grid; gap: 8px; padding-left: 20px; margin: 0; max-width: 72ch; }
+code { font: 14px var(--mono); }
+@media (max-width: 820px) { .top { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Horodyne battery voltage to percent</h1>
+    <p class="lead">The exact 21-point table in <code>Horodyne/hal_battery.cpp</code> (<code>CURVE</code>), build 33. Use it with a multimeter: measure the cell, then read the percent the watch should show.</p>
+  </header>
+
+  <div class="top">
+    <section class="panel" aria-label="Battery curve chart">
+      <h2>Voltage across the charge range</h2>
+      <div class="legend">
+        <span><i></i>Resting cell</span>
+        <span><i class="c"></i>Reading on the charger (+ offset, held at 4.20 V)</span>
+      </div>
+      <svg id="chart" viewBox="0 0 680 420" role="img" aria-label="Line chart of battery voltage against percent. Resting voltage rises steeply from 3.27 volts at 0 percent to 3.61 at 5 percent, stays nearly flat to 3.85 at 55 percent, then climbs to 4.20 at 100 percent."></svg>
+    </section>
+
+    <section class="panel" aria-label="Voltage checker">
+      <h2>Check a reading</h2>
+      <div class="seg">
+        <button id="mRest" aria-pressed="true">Resting</button>
+        <button id="mChg" aria-pressed="false">On charger</button>
+      </div>
+      <label class="field" for="volts">Measured voltage
+        <input id="volts" type="number" min="3" max="4.3" step="0.01" value="3.80">
+      </label>
+      <input id="slider" type="range" min="3.2" max="4.3" step="0.01" value="3.80" aria-label="Voltage slider">
+      <label class="field" for="off" style="margin-top:14px">Charger offset (V)
+        <input id="off" type="number" min="0.05" max="0.6" step="0.01" value="0.30">
+      </label>
+      <div class="big" id="pct">40%</div>
+      <div class="state" id="state"></div>
+      <dl>
+        <dt>Cell voltage used</dt><dd id="cell"></dd>
+        <dt>ADC pin (cell ÷ 3)</dt><dd id="adc"></dd>
+      </dl>
+    </section>
+  </div>
+
+  <section class="panel">
+    <h2>Lookup table</h2>
+    <p class="lead" style="margin:0 0 12px">Between two rows the watch interpolates in a straight line, then rounds to the nearest percent.</p>
+    <div class="scroll"><table>
+      <thead><tr><th scope="col">Percent</th><th scope="col">Resting V</th><th scope="col">Step from last</th><th scope="col">ADC pin mV</th><th scope="col" id="chgHead">On charger V</th><th scope="col">Watch behaviour</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table></div>
+  </section>
+
+  <section class="panel">
+    <h2>Reading it correctly</h2>
+    <ul class="notes">
+      <li><strong>Match against a resting cell.</strong> Measure with the screen off and the charger out, after a few minutes. The percent only moves on resting readings while on battery.</li>
+      <li><strong>The middle is flat.</strong> From 10% to 55% the cell moves only 0.16 V, so a 0.01 V meter or divider error shifts the percent by about 3 points.</li>
+      <li><strong>On USB the reading is not the cell.</strong> Charge current lifts it, so the watch subtracts an offset: 0.30 V by default, 0.35 V measured on this cell on 2026-10-26, and relearned each time you unplug.</li>
+      <li><strong>Near full, voltage stops helping.</strong> At 4.15 V and above on the charger, percent rises 1 point every 90 s, stops at 99% until unplugged, and never falls while charging.</li>
+      <li><strong>This is a generic curve.</strong> The table is a typical single-cell LiPo discharge curve and has not been measured on your 802540 cell. A worn cell will differ, so a long unplugged log could replace it with your own numbers.</li>
+    </ul>
+  </section>
+</main>
+
+<script>
+const CURVE = [3.27,3.61,3.69,3.71,3.73,3.75,3.77,3.79,3.80,3.82,3.84,3.85,3.87,3.91,3.95,3.98,4.02,4.08,4.11,4.15,4.20];
+const HOLD = 4.20, CV = 4.15, DIV = 3;
+
+// Same lookup as batteryVoltsToPercent() in hal_battery.cpp.
+function toPercent(v) {
+  if (v <= CURVE[0]) return 0;
+  if (v >= CURVE[20]) return 100;
+  for (let i = 1; i <= 20; i++) if (v < CURVE[i])
+    return Math.round((i - 1 + (v - CURVE[i - 1]) / (CURVE[i] - CURVE[i - 1])) * 5);
+  return 100;
+}
+function zone(p) {
+  if (p <= 3) return ['Shutdown after 3 readings', 'var(--off)'];
+  if (p <= 10) return ['Low Power Mode on', 'var(--low)'];
+  if (p <= 20) return ['Low battery warning', 'var(--warn)'];
+  return ['Normal', 'var(--muted)'];
+}
+
+const $ = id => document.getElementById(id);
+const svg = $('chart'), W = 680, H = 420, L = 58, R = 16, T = 14, B = 44;
+const X = p => L + p / 100 * (W - L - R);
+const Y = v => H - B - (v - 3.2) / (4.3 - 3.2) * (H - T - B);
+const offset = () => { const o = parseFloat($('off').value); return isFinite(o) ? Math.min(Math.max(o, 0.05), 0.6) : 0.3; };
+const chgV = (r, o) => Math.min(r + o, HOLD);
+let mode = 'rest', hover = null;
+
+function draw() {
+  const o = offset();
+  let s = '';
+  [[0, 3, 'var(--off)'], [3, 10, 'var(--low)'], [10, 20, 'var(--warn)']].forEach(([a, b, c]) =>
+    s += `<rect x="${X(a)}" y="${T}" width="${X(b) - X(a)}" height="${H - T - B}" fill="${c}" opacity=".1"/>`);
+  for (let v = 3.2; v < 4.31; v += 0.2) {
+    const y = Y(v);
+    s += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="var(--line)"/><text x="${L - 8}" y="${y + 4}" text-anchor="end" font-size="12" fill="var(--muted)">${v.toFixed(1)}</text>`;
+  }
+  for (let p = 0; p <= 100; p += 20)
+    s += `<text x="${X(p)}" y="${H - B + 20}" text-anchor="middle" font-size="12" fill="var(--muted)">${p}%</text>`;
+  s += `<text x="${(L + W - R) / 2}" y="${H - 6}" text-anchor="middle" font-size="12" fill="var(--muted)">Percent shown</text>`;
+  s += `<text transform="translate(13 ${(T + H - B) / 2}) rotate(-90)" text-anchor="middle" font-size="12" fill="var(--muted)">Volts</text>`;
+  [[1.5, '3%'], [6.5, '10%'], [15, '20%']].forEach(([p, t]) =>
+    s += `<text x="${X(p)}" y="${T + 13}" text-anchor="middle" font-size="10" fill="var(--muted)">${t}</text>`);
+  const rest = CURVE.map((v, i) => `${X(i * 5)},${Y(v)}`).join(' ');
+  const chg = CURVE.map((v, i) => `${X(i * 5)},${Y(chgV(v, o))}`).join(' ');
+  s += `<polyline points="${chg}" fill="none" stroke="var(--charge)" stroke-width="2" stroke-dasharray="6 4"/>`;
+  s += `<polyline points="${rest}" fill="none" stroke="var(--rest)" stroke-width="2"/>`;
+  CURVE.forEach((v, i) => s += `<circle cx="${X(i * 5)}" cy="${Y(v)}" r="3.5" fill="var(--rest)" stroke="var(--surface)" stroke-width="2"/>`);
+  s += `<text x="${X(100) - 2}" y="${Y(3.96)}" text-anchor="end" font-size="12" fill="var(--ink)">4.20 V at 100%</text>`;
+  s += `<text x="${X(0) + 34}" y="${Y(3.27) + 4}" font-size="12" fill="var(--ink)">3.27 V at 0%</text>`;
+
+  // The current reading from the checker.
+  const typed = parseFloat($('volts').value) || 3.8;
+  const cell = mode === 'rest' ? typed : typed - o;
+  const p = toPercent(cell);
+  s += `<circle cx="${X(p)}" cy="${Y(Math.max(cell, 3.2))}" r="7" fill="none" stroke="var(--ink)" stroke-width="2"/>`;
+
+  if (hover !== null) {
+    const r = CURVE[hover / 5], c = chgV(r, o), x = X(hover), bx = Math.min(x + 10, W - R - 166), by = Math.min(Y(r) + 12, H - B - 62);
+    s += `<line x1="${x}" x2="${x}" y1="${T}" y2="${H - B}" stroke="var(--muted)"/>`;
+    s += `<g class="tip"><rect x="${bx}" y="${by}" width="166" height="56" rx="3" fill="var(--bg)" stroke="var(--line)"/>
+      <text x="${bx + 10}" y="${by + 18}" fill="var(--ink)" font-weight="500">${hover}%</text>
+      <text x="${bx + 10}" y="${by + 34}" fill="var(--ink)">Resting ${r.toFixed(2)} V</text>
+      <text x="${bx + 10}" y="${by + 49}" fill="var(--ink)">Charger ${c.toFixed(2)} V</text></g>`;
+  }
+  svg.innerHTML = s;
+}
+
+function table() {
+  const o = offset();
+  $('rows').innerHTML = CURVE.map((v, i) => {
+    const p = i * 5, step = i ? (v - CURVE[i - 1]).toFixed(2) : '–', c = chgV(v, o);
+    const note = p === 0 ? 'Shutdown below 3%' : p === 5 ? 'Low Power Mode at 10% or less'
+      : p === 10 ? 'Low Power Mode starts' : p === 20 ? 'Warning colour starts' : p === 100 ? 'Shown only off the charger'
+      : c >= CV ? 'On charger: percent creeps' : '';
+    return `<tr class="${note ? 'mark' : ''}"><td>${p}%</td><td>${v.toFixed(2)}</td><td>${step}</td><td>${Math.round(v * 1000 / DIV)}</td><td>${c.toFixed(2)}</td><td>${note}</td></tr>`;
+  }).reverse().join('');
+}
+
+function update() {
+  const v = parseFloat($('volts').value), o = offset();
+  if (!isFinite(v)) return;
+  const cell = mode === 'rest' ? v : v - o, p = toPercent(cell);
+  const creeping = mode !== 'rest' && v >= CV;
+  $('pct').textContent = (mode === 'rest' ? p : Math.min(p, 99)) + '%';
+  const [t, c] = creeping ? ['Charger holding: percent creeps', 'var(--charge)'] : zone(p);
+  $('state').textContent = t; $('state').style.color = c;
+  $('cell').textContent = cell.toFixed(2) + ' V';
+  $('adc').textContent = Math.round(v * 1000 / DIV) + ' mV';
+  draw(); table();
+}
+
+$('volts').addEventListener('input', () => { $('slider').value = $('volts').value; update(); });
+$('slider').addEventListener('input', () => { $('volts').value = (+$('slider').value).toFixed(2); update(); });
+$('off').addEventListener('input', update);
+function setMode(m) {
+  mode = m;
+  $('mRest').setAttribute('aria-pressed', m === 'rest');
+  $('mChg').setAttribute('aria-pressed', m !== 'rest');
+  const v = m === 'rest' ? 3.8 : 4.1;
+  $('volts').value = v.toFixed(2); $('slider').value = v;
+  update();
+}
+$('mRest').addEventListener('click', () => setMode('rest'));
+$('mChg').addEventListener('click', () => setMode('chg'));
+svg.addEventListener('pointermove', e => {
+  const b = svg.getBoundingClientRect(), x = (e.clientX - b.left) / b.width * W;
+  hover = Math.round(Math.min(Math.max((x - L) / (W - L - R), 0), 1) * 20) * 5;
+  draw();
+});
+svg.addEventListener('pointerleave', () => { hover = null; draw(); });
+update();
+</script>
+</body>
+</html>

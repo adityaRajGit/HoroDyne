@@ -2,6 +2,7 @@
 #include "svc_settings.h"
 #include "config.h"
 #include <Wire.h>
+#include <stdlib.h>
 #include <sys/time.h>
 #include <esp_sntp.h>
 
@@ -22,6 +23,8 @@ const uint8_t TZ_COUNT = sizeof(TZ_LIST) / sizeof(TZ_LIST[0]);
 static bool     rtcOk = false;
 static uint32_t lastRtcReadMs = 0;
 static volatile bool ntpDone = false;
+static volatile bool jumped = false;   // the date may have moved without midnight passing
+static volatile bool ntpRunning = false;   // SNTP sets the time on its own task, before clockNtpSync can compare it
 
 // ----- PCF85063 over raw I2C ----------------------------------------------
 static uint8_t bcd2dec(uint8_t v) { return (v >> 4) * 10 + (v & 0x0F); }
@@ -108,6 +111,13 @@ void clockNextTz() {
     settings.tzIndex = (settings.tzIndex + 1) % TZ_COUNT;
     settingsSave();
     clockApplyTz();
+    jumped = true;
+}
+
+// ponytail: a real midnight during a sync keeps yesterday's steps; a sync lasts seconds, so that is rare.
+bool clockTakeJump() {
+    if (ntpRunning) return true;
+    bool j = jumped; jumped = false; return j;
 }
 
 void clockBegin() {
@@ -126,11 +136,14 @@ void clockBegin() {
 bool clockValid()  { return time(nullptr) > 1700000000; }
 bool clockRtcOk()  { return rtcOk; }
 
+static const long CLOCK_JUMP_S = 60;   // bigger than any drift between corrections
+
 void clockCorrectFromRtc() {
     if (!rtcOk || millis() - lastRtcReadMs < 10UL * 60UL * 1000UL) return;
     time_t utc = rtcGetUtc();
     lastRtcReadMs = millis();
     if (utc > 1700000000) {
+        if (clockValid() && labs((long)(utc - time(nullptr))) > CLOCK_JUMP_S) jumped = true;
         struct timeval tv = { utc, 0 };
         settimeofday(&tv, nullptr);
     }
@@ -141,21 +154,24 @@ static void onNtp(struct timeval *) { ntpDone = true; }
 bool clockNtpSync() {
     time_t before = time(nullptr);
     uint32_t beforeMs = millis();
+    ntpRunning = true;
     ntpDone = false;
     sntp_set_time_sync_notification_cb(onNtp);
     uint8_t i = settings.tzIndex < TZ_COUNT ? settings.tzIndex : 0;
     configTzTime(TZ_LIST[i].posix, "time.google.com", "time.apple.com", "time.windows.com");   // pool.ntp.org timed out on the home network
     uint32_t t0 = millis();
     while (!ntpDone && millis() - t0 < 10000) delay(50);
-    if (!ntpDone) return false;
+    if (!ntpDone) { ntpRunning = false; return false; }
 
     time_t now = time(nullptr);
     if (before > 1700000000) {
         // How far the sleeping clock drifted since the last correction (Phase 0 measurement).
         long expected = (long)(before + (millis() - beforeMs) / 1000);
         Serial.printf("clock: drift %+ld s\n", (long)(now - expected));
+        if (labs((long)(now - expected)) > CLOCK_JUMP_S) jumped = true;
     }
     if (rtcOk) { rtcSetUtc(now); lastRtcReadMs = millis(); }
+    ntpRunning = false;
     return true;
 }
 
@@ -178,12 +194,12 @@ void clockDateText(char *out, size_t n) {
     snprintf(out, n, "%s %d %s", DAYS[t.tm_wday], t.tm_mday, MONS[t.tm_mon]);
 }
 
-int clockDayOfYear() {
+int clockDayNumber() {
     if (!clockValid()) return -1;
     time_t now = time(nullptr);
     struct tm t;
     localtime_r(&now, &t);
-    return t.tm_yday;
+    return (t.tm_year + 1900) * 1000 + t.tm_yday;
 }
 
 int clockHour() {

@@ -1,5 +1,5 @@
 #pragma once
-// Daily steps from the IMU pedometer, zeroed at midnight, with 2-hour history.
+// Daily steps counted in software from the IMU FIFO, zeroed at midnight, with 2-hour history.
 #include <Arduino.h>
 
 struct Activity {

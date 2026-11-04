@@ -6,6 +6,7 @@ BatteryState battery = { false, 0, 0, false, -1 };
 
 // Resting voltage of a single-cell LiPo, every 5 % from 0 to 100.
 // A straight 3.3-4.2 V scale is badly wrong in the flat middle of the curve.
+// 100 % means full at the board's 4.2 V charge limit. Not calibrated for the 3.87 V cell.
 static const float CURVE[21] = {
     3.27f, 3.61f, 3.69f, 3.71f, 3.73f, 3.75f, 3.77f, 3.79f, 3.80f, 3.82f, 3.84f,
     3.85f, 3.87f, 3.91f, 3.95f, 3.98f, 4.02f, 4.08f, 4.11f, 4.15f, 4.20f
@@ -31,6 +32,7 @@ static bool     radioOn = false;
 static uint32_t radioOffMs = 0;
 
 void batteryRadio(bool on) { radioOn = on; if (!on) radioOffMs = millis(); }
+bool batteryRadioOk() { return !battery.present || battery.charging || battery.percent >= BAT_RADIO_MIN_PCT; }
 
 // History for the days-left estimate: one sample every 30 minutes while discharging.
 static const uint8_t HIST = 48;

@@ -17,10 +17,12 @@ struct Weather {
 extern Weather weather;
 
 bool     netHasCredentials();
-bool     netSync();                  // connect, NTP, weather, radio off. Blocks up to ~20 s.
-bool     netGithubSync();             // connect, fetch GitHub, radio off. Blocks up to ~30 s.
+// Both block for tens of seconds, so they run on the worker task in Horodyne.ino.
+bool     netSync();                  // connect, NTP, weather, radio off
+bool     netGithubSync();             // connect, fetch GitHub, radio off
 uint32_t netLastSyncMs();             // millis() of the last attempt, 0 if never
 bool     netLastSyncOk();
+uint8_t  netFailCount();              // failed syncs in a row
 
 // Wi-Fi setup page: the watch becomes the network "HORODYNE-SETUP"; join it from a
 // phone, pick your Wi-Fi and type the weather city and GitHub login. Non-blocking: call netPortalProcess() in loop.

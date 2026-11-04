@@ -126,6 +126,7 @@ void displayBegin() {
     size_t bytes = SCREEN_W * BUF_LINES * 2;
     void *b1 = heap_caps_malloc(bytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
     void *b2 = heap_caps_malloc(bytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    if (!b1) { Serial.println("display: no memory for the draw buffer"); delay(100); ESP.restart(); }
     lv_display_set_buffers(disp, b1, b2, bytes, LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(disp, flushCb);
 

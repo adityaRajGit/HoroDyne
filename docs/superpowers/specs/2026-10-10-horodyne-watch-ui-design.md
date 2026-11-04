@@ -5,7 +5,7 @@ Date: 2026-10-10 · Status: approved design (font change applied)
 ## 1. Goal
 
 A minimalist, watchOS 10–style clock and menu for the Waveshare ESP32-S3-Touch-LCD-1.69,
-used in landscape (280 × 240), set entirely in **Unica One**, running on a 1000 mAh LiPo.
+used in landscape (280 × 240), set entirely in **Unica One**, running on a 400 mAh PL432224 LiPo.
 Success: glanceable time, five small apps, correct battery percentage, and multi-week battery life.
 
 ## 2. Fixed constraints
@@ -19,7 +19,7 @@ Success: glanceable time, five small apps, correct battery percentage, and multi
 | Time | Wi-Fi NTP at boot and every 6 h; Wi-Fi off between syncs |
 | Idle | Screen off + light sleep; wake on raise (IMU), touch, PWR, sync timer |
 | UI stack | LVGL 9 on LovyanGFX |
-| Battery | 1000 mAh LiPo 802540, JST lead (check plug type and polarity) |
+| Battery | PL432224, treated as 400 mAh (label: 3.87 V, 1.08 Wh, which works out to about 280 mAh), JST lead (check plug type and polarity). Charge off-board: the board's charger is about 2 A |
 | Toolchain | Arduino sketch, Arduino Cloud editor (see §11) |
 | Defaults | Step goal 8,000 · 24-hour · timeout 10 s · time zone IST (+5:30) |
 | Weather location | City typed on the Wi-Fi setup page (no IP geolocation) |

@@ -37,8 +37,8 @@ struct GitHub {
     time_t   fetchedAt;         // 0 = never
     GhError  error;             // result of the last attempt; older data stays usable
     uint16_t openCount, mergedCount, reviewCount;
-    GhPr     open[5], merged[5];
-    uint8_t  openShown, mergedShown;
+    GhPr     open[5], merged[5], review[5];
+    uint8_t  openShown, mergedShown, reviewShown;
     GhRun    runs[3];
     uint8_t  runCount;
     uint16_t days[14];          // contributions per day, today last
@@ -51,8 +51,9 @@ extern GitHub gh;
 
 bool    ghParseData(JsonDocument &doc, GitHub &out);     // GraphQL reply
 void    ghParseCommits(JsonDocument &doc, GitHub &out);  // REST commit search reply
-time_t  ghParseTime(const char *iso);                    // "2026-11-01T07:30:00Z", 0 if malformed
+time_t  ghParseTime(const char *iso);                    // "2026-11-01T07:30:00Z" or "...+05:30", 0 if malformed
 bool    ghValidLogin(const char *login);                 // letters, digits and single hyphens
 const GhRun *ghHeadRun(const GitHub &g);                 // running run first, else the newest
 void    ghAge(char *out, size_t n, time_t when, time_t now);  // "2M", "3H", "1D"
-GhError ghFetch();                                       // Wi-Fi must be up; fills gh
+GhError ghFetch();                                       // Wi-Fi must be up; background task: stages the data, sets gh.error
+void    ghApply();                                       // loop task, after ghFetch: moves the staged data into gh

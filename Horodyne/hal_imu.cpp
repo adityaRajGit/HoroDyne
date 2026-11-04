@@ -46,8 +46,8 @@ bool imuBegin() {
     imu.disableGyro();
     Serial.printf("imu: accel %s, step fifo %s, motion wake %s\n",
                   acc ? "ok" : "FAILED", fifo ? "ok" : "FAILED", mot ? "ok" : "FAILED");
-    ok = true;
-    return true;
+    ok = acc;
+    return acc && fifo;
 }
 
 bool imuReadAccel(float &x, float &y, float &z) {

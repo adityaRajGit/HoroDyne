@@ -72,7 +72,7 @@ void ghStateGlyph(uint8_t state, Glyph &g, uint32_t &c) {
 }
 
 // ----- shared pieces -----------------------------------------------------------------------
-static uint8_t tab = 0, prIdx = 0, runIdx = 0;   // open/merged, and which row was tapped
+static uint8_t tab = 0, prIdx = 0, runIdx = 0;   // open/merged/review, and which row was tapped
 static lv_obj_t *mainAge = nullptr;
 
 static void goTo(lv_event_t *e) { uiGoLater((ScreenId)(uintptr_t)lv_event_get_user_data(e), LV_SCR_LOAD_ANIM_FADE_IN); }
@@ -180,15 +180,16 @@ static void tile(lv_obj_t *s, int x, int y, const char *v, const char *name, uin
 
 static void openOpenPrs(lv_event_t *) { tab = 0; uiGoLater(SCR_GH_PRS, LV_SCR_LOAD_ANIM_FADE_IN); }
 static void openMergedPrs(lv_event_t *) { tab = 1; uiGoLater(SCR_GH_PRS, LV_SCR_LOAD_ANIM_FADE_IN); }
+static void openReviewPrs(lv_event_t *) { tab = 2; uiGoLater(SCR_GH_PRS, LV_SCR_LOAD_ANIM_FADE_IN); }
 
 RefreshFn buildGithub(lv_obj_t *s) {
     if (!settings.ghToken[0] || !settings.ghUser[0]) return buildConnect(s);
     if (!uiSyncing() && (!lastAttemptMs || millis() - lastAttemptMs > REFETCH_MS)) {
         lastAttemptMs = millis();
-        lv_timer_t *t = lv_timer_create(askSync, 300, NULL);   // after the fade: the fetch blocks the UI
+        lv_timer_t *t = lv_timer_create(askSync, 300, NULL);   // after the fade
         lv_timer_set_repeat_count(t, 1);
     }
-    if (gh.error == GH_BAD_TOKEN && !uiSyncing()) return buildTrouble(s, "TOKEN EXPIRED", "MAKE A NEW GITHUB TOKEN, THEN ADD IT IN SETUP");
+    if (gh.error == GH_BAD_TOKEN && !uiSyncing()) return buildTrouble(s, "TOKEN REJECTED", "MAKE A NEW GITHUB TOKEN, THEN ADD IT IN SETUP");
 
     uiHeader(s, "GITHUB", COL_TEXT);
     headerAge(s, 80);
@@ -252,6 +253,7 @@ RefreshFn buildGithub(lv_obj_t *s) {
     lv_obj_add_event_cb(lv_obj_get_child(s, -1), openMergedPrs, LV_EVENT_CLICKED, NULL);
     snprintf(v, sizeof(v), "%u", gh.reviewCount);
     tile(s, 188, y, v, "REVIEW", COL_LEVEL, G_EYE, SCR_GH_PRS, offline);
+    lv_obj_add_event_cb(lv_obj_get_child(s, -1), openReviewPrs, LV_EVENT_CLICKED, NULL);
 
     if (!offline) {
         lv_obj_t *r = uiButton(s, 12, 194, 256, 36, goTo, (void *)(uintptr_t)SCR_GH_COMMITS);
@@ -271,9 +273,13 @@ RefreshFn buildGithub(lv_obj_t *s) {
 static void setTab(lv_event_t *e) { tab = (uint8_t)(uintptr_t)lv_event_get_user_data(e); uiGoLater(SCR_GH_PRS, LV_SCR_LOAD_ANIM_NONE); }
 static void openPr(lv_event_t *e) { prIdx = (uint8_t)(uintptr_t)lv_event_get_user_data(e); uiGoLater(SCR_GH_PR, LV_SCR_LOAD_ANIM_FADE_IN); }
 
-static void tabButton(lv_obj_t *s, int x, const char *t, uint8_t id) {
+static const GhPr *tabList() { return tab == 2 ? gh.review : tab ? gh.merged : gh.open; }
+static Glyph    tabGlyph() { return tab == 2 ? G_EYE : tab ? G_MERGE : G_PR; }
+static uint32_t tabColor() { return tab == 2 ? COL_LEVEL : tab ? COL_MERGED : COL_ACTIVITY; }
+
+static void tabButton(lv_obj_t *s, int x, int w, const char *t, uint8_t id) {
     bool on = tab == id;
-    lv_obj_t *b = uiButton(s, x, 36, 120, 32, setTab, (void *)(uintptr_t)id);
+    lv_obj_t *b = uiButton(s, x, 36, w, 32, setTab, (void *)(uintptr_t)id);
     lv_obj_set_style_bg_color(b, lv_color_hex(on ? COL_TEXT : COL_CARD), 0);
     lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(b, 16, 0);
@@ -283,13 +289,14 @@ static void tabButton(lv_obj_t *s, int x, const char *t, uint8_t id) {
 RefreshFn buildGhPrs(lv_obj_t *s) {
     uiHeader(s, "PULL REQUESTS", COL_TEXT);
     char b[48], a[8];
-    snprintf(b, sizeof(b), "OPEN %u", gh.openCount);   tabButton(s, 16, b, 0);
-    snprintf(b, sizeof(b), "MERGED %u", gh.mergedCount); tabButton(s, 144, b, 1);
-    const GhPr *list = tab ? gh.merged : gh.open;
-    uint8_t n = tab ? gh.mergedShown : gh.openShown;
+    snprintf(b, sizeof(b), "OPEN %u", gh.openCount);   tabButton(s, 8, 72, b, 0);
+    snprintf(b, sizeof(b), "MERGED %u", gh.mergedCount); tabButton(s, 84, 96, b, 1);
+    snprintf(b, sizeof(b), "REVIEW %u", gh.reviewCount); tabButton(s, 184, 88, b, 2);
+    const GhPr *list = tabList();
+    uint8_t n = tab == 2 ? gh.reviewShown : tab ? gh.mergedShown : gh.openShown;
     if (!n) {
-        uiGlyph(s, tab ? G_MERGE : G_PR, 122, 88, 36, 0x48484A);
-        centered(s, &font_label, COL_TEXT, 134, tab ? "NO MERGED PRS" : "NO OPEN PRS");
+        uiGlyph(s, tabGlyph(), 122, 88, 36, 0x48484A);
+        centered(s, &font_label, COL_TEXT, 134, tab == 2 ? "NO REVIEWS WAITING" : tab ? "NO MERGED PRS" : "NO OPEN PRS");
         centered(s, &font_small, COL_GREY, 162, "NEW PRS SHOW UP AFTER THE NEXT SYNC");
         return nothing;
     }
@@ -298,8 +305,8 @@ RefreshFn buildGhPrs(lv_obj_t *s) {
         const GhPr &p = list[i];
         ghAge(a, sizeof(a), p.when, time(nullptr));
         snprintf(b, sizeof(b), "#%lu - %s - %s", (unsigned long)p.number, p.repo, a);
-        lv_obj_t *r = row(l, i * ROW_H, tab ? G_MERGE : G_PR, tab ? COL_MERGED : COL_ACTIVITY, p.title, b, openPr, (void *)(uintptr_t)i);
-        if (!tab && p.ci != GH_NONE) {
+        lv_obj_t *r = row(l, i * ROW_H, tabGlyph(), tabColor(), p.title, b, openPr, (void *)(uintptr_t)i);
+        if (tab != 1 && p.ci != GH_NONE) {
             Glyph g; uint32_t c;
             ghStateGlyph(p.ci, g, c);
             uiGlyph(r, g, 238, 19, 18, c);
@@ -309,7 +316,7 @@ RefreshFn buildGhPrs(lv_obj_t *s) {
 }
 
 RefreshFn buildGhPr(lv_obj_t *s) {
-    const GhPr &p = (tab ? gh.merged : gh.open)[prIdx];
+    const GhPr &p = tabList()[prIdx];
     char b[40];
     snprintf(b, sizeof(b), "#%lu", (unsigned long)p.number);
     uiHeader(s, b, COL_TEXT);
@@ -317,10 +324,10 @@ RefreshFn buildGhPr(lv_obj_t *s) {
     lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
     lv_obj_set_size(t, 232, 54);
 
-    uint32_t pill = tab ? COL_MERGED : COL_ACTIVITY;
+    uint32_t pill = tabColor();
     uiRect(s, 24, 96, tab ? 84 : 68, 26, pill, 13);
-    uiGlyph(s, tab ? G_MERGE : G_PR, 32, 102, 14, 0);
-    uiLabel(s, &font_small, COL_BG, 50, 101, tab ? "MERGED" : "OPEN");
+    uiGlyph(s, tabGlyph(), 32, 102, 14, 0);
+    uiLabel(s, &font_small, COL_BG, 50, 101, tab == 2 ? "REVIEW" : tab ? "MERGED" : "OPEN");
     char a[8];
     ghAge(a, sizeof(a), p.when, time(nullptr));
     snprintf(b, sizeof(b), "%s - %s", p.repo, a);

@@ -17,6 +17,7 @@ void batteryBegin();
 void batteryUpdate(bool atRest);
 // Wi-Fi on/off: readings are skipped while it is on and for BAT_RADIO_SETTLE_MS after.
 void batteryRadio(bool on);
+bool batteryRadioOk();   // false when the charge is too low for Wi-Fi's current peaks
 
 // On-battery log: a reading every 10 min while unplugged (kept in RAM, ~24 h).
 // Send 'b' over USB serial to print it: it shows the real discharge, which a USB log can't.

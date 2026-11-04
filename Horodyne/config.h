@@ -44,6 +44,7 @@
 #define SYNC_EVERY_LOW_MS (12UL * 3600UL * 1000UL)
 #define LONG_PRESS_MS     2000UL
 #define DOUBLE_CLICK_MS   300UL
+#define WDT_TIMEOUT_S     90UL                     // longer than the slowest sync, or a slow network reboots the watch
 
 // ----- Raise to wake -----------------------------------------------------
 // Which accelerometer axis points out of the screen, and its sign when the
@@ -53,6 +54,7 @@
 #define RAISE_MIN_G        0.55f  // facing-up component needed to accept a wake
 #define WOM_THRESHOLD_MG   200    // wake-on-motion sensitivity
 #define RAISE_COOLDOWN_MS  1500UL // ignore motion this long after a rejected wake
+#define RAISE_SETTLE_MS    400UL  // keep checking this long after motion starts: the wrist is still turning
 
 // ----- Steps: counted in software from the IMU FIFO (svc_activity.cpp) ------
 // The QMI8658's own pedometer never counts on this board (four walk tests, 2026-10-26).
@@ -72,11 +74,13 @@
 #define LEVEL_INV_Y   0
 
 // ----- Battery -----------------------------------------------------------
-#define BAT_CAPACITY_MAH   1000
-#define BAT_LOAD_COMP_V    0.020f // added to readings taken with the screen on (measure in Phase 0)
+// PL432224, 3.87 V, 1.08 Wh. Used as a 400 mAh cell; the label works out to about 280 mAh.
+#define BAT_CAPACITY_MAH   400
+#define BAT_LOAD_COMP_V    0.120f // added to readings taken with the screen on (measured sag 100-150 mV)
 #define BAT_WARN_PCT       20
 #define BAT_LOWPOWER_PCT   10
 #define BAT_SHUTDOWN_PCT   3
+#define BAT_RADIO_MIN_PCT  10     // no Wi-Fi below this: its current peaks can brown out the cell. Tuning knob
 #define BAT_CHG_STEP_V     0.080f // instant jump/drop that means the cable went in/out
 #define BAT_CHG_OFFSET_V   0.300f // charge current lifts the reading this much (until a jump or an unplug measures it; 0.35 V measured 2026-10-26)
 #define BAT_CV_VOLTS       4.15f  // at or above this on the charger: constant-voltage phase, % creeps instead

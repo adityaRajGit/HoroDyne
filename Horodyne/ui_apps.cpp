@@ -137,7 +137,7 @@ RefreshFn buildBattery(lv_obj_t *s) {
     lv_obj_t *row = uiButton(s, 22, 160, 236, 40, lowPowerTap, NULL);
     uiLabel(row, &font_label, COL_TEXT, 0, 7, "LOW POWER MODE");
     bSwitch = uiSwitch(row, 190, 6, settings.lowPower);
-    uiLabel(s, &font_small, COL_GREY, 22, 206, "DIM, NO ANIMATION, NO WEATHER");
+    uiLabel(s, &font_small, COL_GREY, 22, 206, "DIM, NO ANIMATION, 12 H SYNC");
     return batteryRefresh;
 }
 

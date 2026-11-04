@@ -49,8 +49,9 @@ void activityUpdate() {
     if (n == 0) activityStats.emptyReads++;
     uint32_t delta = stepFeed(g, n);
 
-    int day = clockDayOfYear();
+    int day = clockDayNumber();
     if (day < 0) { activity.steps += delta; return; }   // no clock yet: total only, no history
+    if (clockTakeJump()) lastDay = day;   // a corrected clock is not a midnight: keep today's steps
     if (lastDay >= 0 && day != lastDay) {
         memset(&activity, 0, sizeof(activity));
         delta = 0;      // counted before midnight: the 2-hourly wake keeps this small

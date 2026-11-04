@@ -1,19 +1,13 @@
 /* ==========================================================================
    HORODYNE -- minimalist watch for the Waveshare ESP32-S3-Touch-LCD-1.69
-   Landscape 280 x 240, Unica One, LVGL 9 on LovyanGFX.
+   Landscape 280 x 240, LVGL 9 on LovyanGFX.
 
-   BEFORE THE FIRST UPLOAD (Arduino Cloud editor)
-   1. Libraries > Import: horodyne_lvconf.zip  (LVGL's settings file)
-   2. Libraries (tested): lvgl 9.6.0, LovyanGFX 1.2.32, WiFiManager 2.0.17 (tzapu),
-      ArduinoJson 7.4.3, SensorLib 0.5.0
-   3. Board: ESP32S3 Dev Module, ESP32 core 3.3.x.  Flash Size: 16MB (128Mb),
-      PSRAM: OPI PSRAM, USB CDC On Boot: Enabled,
-      Partition Scheme: 16M Flash (3MB APP/9.9MB FATFS)
-   4. Check the battery plug polarity before connecting the cell.
+   Build and flash with build.sh; libraries and board options are in the README.
+   Check the battery plug polarity before connecting the cell.
 
    SCREEN STATES
    Active -> Dim (after the timeout) -> Sleep (2 s later, ESP32 in light sleep)
-   Sleep wakes on: raise wrist (IMU), touch, PWR, or the 6-hourly sync timer.
+   Sleep wakes on: raise wrist (IMU), touch, PWR, or a timer (steps, sync, countdown).
    ========================================================================== */
 
 #include <Wire.h>
@@ -33,8 +27,10 @@
 #include "ui.h"
 #include "build_info.h"
 #include <Preferences.h>
+#include <esp_task_wdt.h>
 
 enum PowerState : uint8_t { ST_ACTIVE, ST_DIM };
+enum NetJob : uint8_t { NET_NONE, NET_SYNC, NET_GITHUB };
 
 static PowerState state = ST_ACTIVE;
 static uint32_t   lastInputMs = 0;
@@ -42,6 +38,10 @@ static uint32_t   lastTickMs = 0;
 static uint32_t   lastBattMs = 0;
 static uint32_t   raiseCooldownUntil = 0;
 static bool       lowWarned = false;
+static bool       lowPowerAuto = false;   // the battery turned Low Power Mode on, not the user
+static TaskHandle_t  netTask = nullptr;
+static volatile bool netBusy = false;     // the worker owns Wi-Fi until this clears
+static NetJob        netJob = NET_NONE;   // running, or finished and not yet picked up by netFinish()
 
 // ----- helpers -------------------------------------------------------------------
 static uint32_t screenTimeoutMs() {
@@ -53,26 +53,28 @@ static uint8_t dimPercent() {
     return b < 5 ? 5 : b;
 }
 
-static bool syncDue() {
-    if (!netHasCredentials()) return false;
+// Milliseconds until the next sync: 0 = due now, UINT32_MAX = none planned.
+static uint32_t msUntilSync() {
+    if (!batteryRadioOk() || !netHasCredentials()) return UINT32_MAX;   // battery first: the check starts Wi-Fi
     uint32_t last = netLastSyncMs();
-    if (last == 0) return true;
+    if (last == 0) return 0;
     uint32_t every = settings.lowPower ? SYNC_EVERY_LOW_MS : SYNC_EVERY_MS;
-    if (!netLastSyncOk()) every = 3600000UL;   // retry hourly after a failure
-    return millis() - last >= every;
+    if (!netLastSyncOk()) {                    // out of range: retry after 1, 2, then 4 hours
+        uint8_t fails = netFailCount();
+        uint32_t retry = 3600000UL << (fails > 3 ? 2 : fails ? fails - 1 : 0);
+        if (retry < every) every = retry;
+    }
+    uint32_t since = millis() - last;
+    return since >= every ? 0 : every - since;
 }
+
+static bool syncDue() { return msUntilSync() == 0; }
 
 // Milliseconds until the sleeping watch must wake by itself: next sync, the countdown
 // reaching zero, or the next 2-hour step-history block (one of them is midnight).
 static uint32_t msUntilTimerWake() {
-    uint32_t best = 0;
-    if (netHasCredentials()) {
-        uint32_t last = netLastSyncMs();
-        uint32_t every = settings.lowPower ? SYNC_EVERY_LOW_MS : SYNC_EVERY_MS;
-        if (!netLastSyncOk()) every = 3600000UL;
-        uint32_t since = millis() - last;
-        best = (last == 0 || since >= every) ? 1000 : every - since;
-    }
+    uint32_t sync = msUntilSync();
+    uint32_t best = sync == UINT32_MAX ? 0 : sync ? sync : 1000;
     uint32_t block = clockMsUntilMidnight();
     if (block) {
         block = block % (2 * 3600000UL) + 2000;   // just after the boundary, so steps land in the right block
@@ -88,19 +90,44 @@ static uint32_t msUntilTimerWake() {
     return best;
 }
 
-static void runSync() {
+// Network jobs run here so the loop keeps serving the UI, PWR, the alarm and the IMU FIFO.
+// The watchdog watches this task only during a job: idle, it blocks forever by design.
+// ponytail: the UI can read weather mid-write for a moment; a wrong number lasts one refresh.
+static void netWorker(void *) {
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        esp_task_wdt_add(NULL);
+        if (netJob == NET_GITHUB) netGithubSync(); else netSync();
+        esp_task_wdt_delete(NULL);
+        netBusy = false;
+    }
+}
+
+static bool netStart(NetJob job) {
+    if (netBusy || netJob != NET_NONE || !netTask) return false;
+    netJob = job;
+    netBusy = true;
     uiSetSyncing(true);
-    lv_refr_now(NULL);
-    netSync();
+    xTaskNotifyGive(netTask);
+    return true;
+}
+
+// Picks up a finished job on the loop task, the only one that may touch LVGL.
+static void netFinish() {
+    if (netBusy || netJob == NET_NONE) return;
+    if (netJob == NET_GITHUB) ghApply();
+    netJob = NET_NONE;
     uiSetSyncing(false);
     activityUpdate();
+    uiRefresh();
 }
 
 // Low battery: warning + Low Power Mode at 10 %, safe shutdown at 3 %.
 static void checkBattery(bool screenOn) {
     static uint8_t lowCount = 0;
     // Low Power Mode switched itself on at 10 %; like a phone, it switches off again at 80 % on the charger.
-    if (battery.charging && settings.lowPower && battery.percent >= 80) { settings.lowPower = false; settingsSave(); }
+    // One the user turned on stays on.
+    if (battery.charging && lowPowerAuto && battery.percent >= 80) { lowPowerAuto = false; settings.lowPower = false; settingsSave(); }
     if (!battery.present || battery.charging) { lowWarned = false; lowCount = 0; return; }
     // Three low readings in a row (~30 s awake) before switching off: one reading taken
     // under load, right after the cable comes out, can sag far below the real charge.
@@ -117,7 +144,7 @@ static void checkBattery(bool screenOn) {
     }
     if (battery.percent <= BAT_LOWPOWER_PCT && !lowWarned) {
         lowWarned = true;
-        if (!settings.lowPower) { settings.lowPower = true; settingsSave(); }
+        if (!settings.lowPower) { settings.lowPower = true; lowPowerAuto = true; settingsSave(); }
         if (screenOn) { uiShowLowBattery(); displaySetBacklight(uiBrightnessPercent()); }
     }
     if (battery.percent > BAT_LOWPOWER_PCT + 5) lowWarned = false;
@@ -129,6 +156,7 @@ static void sleepUntilWake() {
     displaySleep();
 
     while (true) {
+        esp_task_wdt_reset();
         if (settings.raiseToWake) imuArmWakeOnMotion();   // clears a latched motion event
         uint32_t timerMs = msUntilTimerWake();
         bool imuWake = settings.raiseToWake && (int32_t)(millis() - raiseCooldownUntil) >= 0;
@@ -136,19 +164,30 @@ static void sleepUntilWake() {
             uint32_t left = raiseCooldownUntil - millis();
             if (timerMs == 0 || left < timerMs) timerMs = left;
         }
-        WakeReason why = powerLightSleep((uint64_t)timerMs * 1000ULL, imuWake);
+        // Wi-Fi can't run through light sleep: stay awake with the screen off until the job ends.
+        bool busy = netBusy;
+        if (busy && timerMs > 1000) timerMs = 1000;
+        WakeReason why = powerLightSleep((uint64_t)timerMs * 1000ULL, imuWake, busy);
 
         if (why == WAKE_TIMER) {
             if (countdown.state == CD_RUNNING && cdLeftMs() == 0) break;   // timer done: wake to ring
-            if (syncDue()) runSync();
+            netFinish();
+            if (syncDue()) netStart(NET_SYNC);
             activityUpdate();
             stepsSave(false);
-            batteryUpdate(true);
-            checkBattery(false);
+            if (millis() - lastBattMs >= 10000) {
+                lastBattMs = millis();
+                batteryUpdate(true);
+                checkBattery(false);
+            }
             continue;   // back to sleep; the screen stays off
         }
         if (why == WAKE_IMU) {
+            // Motion fires as the wrist starts turning, so give it time to finish.
+            // ponytail: walking spends this awake on every motion wake (unmeasured); shorten RAISE_SETTLE_MS if it shows.
+            uint32_t t0 = millis();
             bool up = imuFacingUp();
+            while (!up && millis() - t0 < RAISE_SETTLE_MS) { delay(50); up = imuFacingUp(); }
             Serial.printf("wake: motion, %s\n", up ? "facing up" : "not facing up, back to sleep");
             if (up) break;
             raiseCooldownUntil = millis() + RAISE_COOLDOWN_MS;   // walking, not looking
@@ -178,8 +217,9 @@ static const uint32_t STEP_SAVE_MS = 600000UL;
 
 static void stepsSave(bool force) {
     static uint32_t lastSavedSteps = 0, lastSaveMs = 0;
+    stepsRestore();   // before any save: it would overwrite the record if the clock came late
     if (activity.steps == lastSavedSteps || (!force && millis() - lastSaveMs < STEP_SAVE_MS)) return;
-    int day = clockDayOfYear();
+    int day = clockDayNumber();
     if (day < 0) return;
     Preferences p;
     p.begin("steps", false);
@@ -190,12 +230,24 @@ static void stepsSave(bool force) {
     lastSaveMs = millis();
 }
 
+// Runs once the clock is known, which can be long after boot: adds the saved day to whatever
+// was counted in the meantime.
 static void stepsRestore() {
-    int day = clockDayOfYear();
+    static bool done = false;
+    if (done) return;
+    int day = clockDayNumber();
     if (day < 0) return;
+    done = true;
+    Activity saved;
     Preferences p;
     p.begin("steps", true);
-    if (p.getInt("day", -1) == day) p.getBytes("act", &activity, sizeof(activity));
+    if (p.getInt("day", -1) == day && p.getBytes("act", &saved, sizeof(saved)) == sizeof(saved)) {
+        activity.steps += saved.steps;
+        for (int i = 0; i < 12; i++) {
+            uint32_t b = activity.bins[i] + saved.bins[i];
+            activity.bins[i] = b > 65535 ? 65535 : b;
+        }
+    }
     p.end();
 }
 
@@ -223,6 +275,10 @@ void serialCommand(const char *line) {
 // ----- Arduino entry points ------------------------------------------------------------
 void setup() {
     powerLatch();                 // first: keeps the board on when PWR is released
+    setCpuFrequencyMhz(160);      // 240 MHz by default; Wi-Fi and LVGL are fine at 160 and it draws less
+    esp_task_wdt_config_t wdt = { .timeout_ms = WDT_TIMEOUT_S * 1000, .idle_core_mask = 1, .trigger_panic = true };
+    if (esp_task_wdt_reconfigure(&wdt) != ESP_OK) esp_task_wdt_init(&wdt);
+    esp_task_wdt_add(NULL);       // a hung loop reboots instead of freezing the watch
     Serial.begin(115200);
     // On a computer's USB with no serial monitor open nobody reads the log: each print would then
     // wait up to 2 s (20 x 100 ms in HWCDC) and freeze the UI. Drop log lines instead of waiting.
@@ -240,7 +296,7 @@ void setup() {
     displaySetBacklight(uiBrightnessPercent());
     uint32_t splashAt = millis();
 
-    if (!imuBegin()) Serial.println("imu: QMI8658 not found");
+    if (!imuBegin()) Serial.println("imu: setup failed, steps or raise may not work");
     clockBegin();
     stepsRestore();
     activityUpdate();
@@ -250,12 +306,15 @@ void setup() {
     lv_timer_handler();
     lv_refr_now(NULL);
 
-    if (netHasCredentials()) { runSync(); uiRefresh(); }
+    xTaskCreatePinnedToCore(netWorker, "net", 16384, NULL, 1, &netTask, 0);
+    if (batteryRadioOk() && netHasCredentials()) netStart(NET_SYNC);   // battery first: the check starts Wi-Fi
     lastInputMs = millis();
 }
 
 void loop() {
+    esp_task_wdt_reset();
     uint32_t now = millis();
+    netFinish();
 
     // Input: touch (seen by the display driver) and the PWR key.
     uint32_t touched = displayLastTouchMs();
@@ -270,18 +329,14 @@ void loop() {
 
     // Work the UI asked for.
     switch (uiTakeRequest()) {
-        case REQ_SYNC:          runSync(); uiRefresh(); lastInputMs = millis(); break;
-        case REQ_GH_SYNC:
-            uiSetSyncing(true);
-            uiRefresh();
-            lv_refr_now(NULL);
-            netGithubSync();
-            uiSetSyncing(false);
-            activityUpdate();    // the fetch can outlast the IMU FIFO
-            uiRefresh();
-            lastInputMs = millis();
+        case REQ_SYNC:          netStart(NET_SYNC); break;
+        case REQ_GH_SYNC:       if (netStart(NET_GITHUB)) uiRefresh(); break;
+        case REQ_PORTAL_START:
+            // ponytail: holds the loop until the job ends (seconds); the portal needs Wi-Fi to itself.
+            while (netBusy) { esp_task_wdt_reset(); delay(50); }
+            netFinish();
+            netPortalStart();
             break;
-        case REQ_PORTAL_START:  netPortalStart(); break;
         case REQ_PORTAL_CANCEL: netPortalStop(); break;
         case REQ_POWEROFF:      displaySleep(); stepsSave(true); powerOff(); break;
         default: break;
@@ -318,7 +373,7 @@ void loop() {
 
     // Screen timeout.
     bool keepOn = uiPowerSheetOpen() || uiCurrent() == SCR_WIFI || cdRinging();
-    uint32_t idle = now - lastInputMs;
+    uint32_t idle = millis() - lastInputMs;   // not now: lastInputMs can be newer than the start of this pass
     if (keepOn) idle = 0;
     if (state == ST_ACTIVE && idle > screenTimeoutMs()) {
         state = ST_DIM;

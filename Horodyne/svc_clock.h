@@ -14,10 +14,11 @@ bool clockRtcOk();               // the PCF85063 answered and is ticking
 bool clockNtpSync();             // needs Wi-Fi already connected; also writes the RTC
 void clockCorrectFromRtc();      // re-reads the RTC every 10 min to cancel sleep drift
 void clockNextTz();
+bool clockTakeJump();            // true once after the clock was corrected or the zone changed
 
 // Formatting for the UI
 void clockTimeText(char *out, size_t n);   // "10:42" or "9:42"
 void clockDateText(char *out, size_t n);   // "SAT 10 OCT"
-int  clockDayOfYear();                     // -1 while the time is unknown
+int  clockDayNumber();                     // year * 1000 + day of year, -1 while the time is unknown
 int  clockHour();                          // 0-23, -1 while unknown
 uint32_t clockMsUntilMidnight();           // 0 while unknown

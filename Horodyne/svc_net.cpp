@@ -14,6 +14,7 @@
 Weather weather = {};
 static uint32_t lastSyncMs = 0;
 static bool     lastSyncOk = false;
+static uint8_t  failCount = 0;    // failed syncs in a row
 
 static int8_t credsCached = -1;   // -1 = not checked yet
 
@@ -30,6 +31,7 @@ bool netHasCredentials() {
 
 uint32_t netLastSyncMs() { return lastSyncMs; }
 bool     netLastSyncOk() { return lastSyncOk; }
+uint8_t  netFailCount()  { return failCount; }
 
 const char *weatherCondition(int code) {
     if (code == 0) return "CLEAR";
@@ -135,7 +137,9 @@ static bool fetchWeather() {
     return true;
 }
 
+// The one way onto Wi-Fi, so no caller can start the radio on a nearly empty cell.
 static bool connect(uint32_t timeoutMs) {
+    if (!batteryRadioOk()) return false;
     batteryRadio(true);
     WiFi.mode(WIFI_STA);
     WiFi.begin();   // credentials saved by the setup page
@@ -153,12 +157,18 @@ static void radioOff() {
 bool netSync() {
     lastSyncMs = millis();
     lastSyncOk = false;
-    if (!connect(10000)) { radioOff(); Serial.println("net: Wi-Fi connect failed"); return false; }
+    if (!connect(10000)) {
+        radioOff();
+        if (failCount < 255) failCount++;
+        Serial.println("net: Wi-Fi connect failed");
+        return false;
+    }
     lastSyncOk = clockNtpSync();
     // Weather every sync, Low Power Mode too: Wi-Fi is already up, so it costs a few seconds.
     if (!settings.hasLocation) geocodeCity();
     Serial.printf("net: weather %s\n", fetchWeather() ? "ok" : settings.hasLocation ? "fetch failed" : "no city set");
     radioOff();
+    failCount = lastSyncOk ? 0 : failCount < 255 ? failCount + 1 : 255;
     Serial.printf("net: sync %s\n", lastSyncOk ? "ok" : "failed");
     return lastSyncOk;
 }
@@ -215,15 +225,16 @@ int netPortalProcess() {
             strlcpy(settings.ghToken, token, sizeof(settings.ghToken));
             settingsSave();
         }
-        if (WiFi.status() == WL_CONNECTED || connect(10000)) {
-            credsCached = 1;
+        bool online = WiFi.status() == WL_CONNECTED || connect(10000);
+        credsCached = online ? 1 : -1;   // not online: the saved network may still work later, so look again
+        if (online) {
             lastSyncMs = millis();
             lastSyncOk = clockNtpSync();
             geocodeCity();
             fetchWeather();
         }
         netPortalStop();
-        return 1;
+        return online ? 1 : -1;
     }
     if (millis() - portalStartMs > 300000UL) { netPortalStop(); return -1; }
     return 0;

@@ -22,13 +22,17 @@ static void copyAscii(char *out, size_t n, const char *s) {
 }
 
 time_t ghParseTime(const char *t) {
-    int y, m, d, hh, mm, ss;
-    if (!t || sscanf(t, "%d-%d-%dT%d:%d:%d", &y, &m, &d, &hh, &mm, &ss) != 6) return 0;
+    int y, m, d, hh, mm, ss, used = 0, oh = 0, om = 0;
+    if (!t || sscanf(t, "%d-%d-%dT%d:%d:%d%n", &y, &m, &d, &hh, &mm, &ss, &used) != 6) return 0;
+    char sign = 0;
+    int offset = 0;                                      // "Z" or nothing: already UTC
+    if (sscanf(t + used, "%c%d:%d", &sign, &oh, &om) == 3 && (sign == '+' || sign == '-'))
+        offset = (sign == '+' ? 1 : -1) * (oh * 3600 + om * 60);
     y -= m <= 2;                                         // days from civil (Howard Hinnant)
     int era = y / 400, yoe = y - era * 400;
     int doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
     long days = era * 146097L + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468;
-    return (time_t)(days * 86400LL + hh * 3600 + mm * 60 + ss);
+    return (time_t)(days * 86400LL + hh * 3600 + mm * 60 + ss - offset);
 }
 
 bool ghValidLogin(const char *s) {
@@ -50,6 +54,11 @@ static GhState checkState(const char *status, const char *conclusion) {
     if (strcmp(status, "COMPLETED")) return !strcmp(status, "IN_PROGRESS") ? GH_RUN : GH_NONE;
     if (!conclusion) return GH_NONE;
     return !strcmp(conclusion, "SUCCESS") || !strcmp(conclusion, "NEUTRAL") || !strcmp(conclusion, "SKIPPED") ? GH_PASS : GH_FAIL;
+}
+
+// A whole run that hasn't finished is in progress, even while it only waits for a runner.
+static GhState suiteState(const char *status, const char *conclusion) {
+    return status && strcmp(status, "COMPLETED") ? GH_RUN : checkState(status, conclusion);
 }
 
 static uint8_t readPrs(JsonArray nodes, GhPr *out, uint8_t max) {
@@ -100,7 +109,7 @@ static void readRuns(JsonArray repos, GitHub &g) {
         copyAscii(r.repo, sizeof(r.repo), repo["name"]);
         copyAscii(r.branch, sizeof(r.branch), repo["defaultBranchRef"]["name"]);
         r.number = suite["workflowRun"]["runNumber"] | 0;
-        r.state = checkState(suite["status"], suite["conclusion"]);
+        r.state = suiteState(suite["status"], suite["conclusion"]);
         r.when = ghParseTime(suite["updatedAt"]);
         r.jobCount = 0;
         for (JsonObject c : JsonArray(suite["checkRuns"]["nodes"])) {
@@ -122,6 +131,7 @@ bool ghParseData(JsonDocument &doc, GitHub &g) {
     g.reviewCount = d["review"]["issueCount"] | 0;
     g.openShown = readPrs(d["open"]["nodes"], g.open, 5);
     g.mergedShown = readPrs(d["merged"]["nodes"], g.merged, 5);
+    g.reviewShown = readPrs(d["review"]["nodes"], g.review, 5);
     readDays(d["user"]["contributionsCollection"]["contributionCalendar"]["weeks"], g);
     readRuns(d["user"]["repositories"]["nodes"], g);
     return true;
@@ -167,7 +177,7 @@ static const char QUERY[] =
     "query($o:String!,$m:String!,$r:String!,$u:String!){"
     "open:search(query:$o,type:ISSUE,first:5){issueCount nodes{...P}}"
     "merged:search(query:$m,type:ISSUE,first:5){issueCount nodes{...P}}"
-    "review:search(query:$r,type:ISSUE,first:1){issueCount}"
+    "review:search(query:$r,type:ISSUE,first:5){issueCount nodes{...P}}"
     "user(login:$u){"
     "contributionsCollection{contributionCalendar{weeks{contributionDays{contributionCount}}}}"
     "repositories(first:3,orderBy:{field:PUSHED_AT,direction:DESC}){nodes{name defaultBranchRef{name target{...on Commit{"
@@ -216,6 +226,18 @@ static GhError request(const char *url, const char *body, JsonDocument &doc, Jso
     return r;
 }
 
+// ghFetch runs on the network task while the UI reads gh: it fills this copy, ghApply swaps it in.
+static GitHub staged;
+static volatile bool stagedReady = false;
+
+void ghApply() {
+    if (!stagedReady) return;
+    GhError e = gh.error;
+    gh = staged;
+    gh.error = e;
+    stagedReady = false;
+}
+
 GhError ghFetch() {
     const char *u = settings.ghUser;
     if (!ghValidLogin(u) || !settings.ghToken[0]) return gh.error = GH_BAD_TOKEN;
@@ -231,7 +253,8 @@ GhError ghFetch() {
 
     JsonDocument doc;
     GhError r = request("https://api.github.com/graphql", body.c_str(), doc, nullptr);
-    if (r == GH_OK && !ghParseData(doc, gh)) {
+    staged = gh;                                         // a failed commit list keeps the old one
+    if (r == GH_OK && !ghParseData(doc, staged)) {
         Serial.printf("github: reply error: %s\n", (const char *)(doc["errors"][0]["message"] | "no data"));
         r = GH_FETCH_FAILED;
     }
@@ -245,9 +268,10 @@ GhError ghFetch() {
     doc.clear();
     String url = String("https://api.github.com/search/commits?sort=author-date&order=desc&per_page=5&q=author:") + u;
     // PRs and runs are already in: a failed commit list keeps the old one rather than failing the sync.
-    if (request(url.c_str(), nullptr, doc, &filter) == GH_OK) ghParseCommits(doc, gh);
+    if (request(url.c_str(), nullptr, doc, &filter) == GH_OK) ghParseCommits(doc, staged);
 
-    gh.fetchedAt = time(nullptr);
+    staged.fetchedAt = time(nullptr);
+    stagedReady = true;
     return gh.error = GH_OK;
 }
 #endif
