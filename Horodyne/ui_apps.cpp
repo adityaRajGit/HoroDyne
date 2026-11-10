@@ -440,7 +440,10 @@ RefreshFn buildAbout(lv_obj_t *s) {
 }
 
 // ----- Wi-Fi setup -------------------------------------------------------------------------
-static void wifiRefresh() {}
+static lv_obj_t *wifiStatus;
+
+// Rather than send you looking for a network that isn't there.
+static void wifiRefresh() { uiSetText(wifiStatus, netPortalFailed() ? "NETWORK DID NOT START" : ""); }
 
 RefreshFn buildWifi(lv_obj_t *s) {
     uiHeader(s, "WI-FI SETUP", COL_GREY);
@@ -449,11 +452,12 @@ RefreshFn buildWifi(lv_obj_t *s) {
         { &font_label, COL_TEXT, 76,  "HORODYNE-SETUP" },
         { &font_small, COL_GREY, 116, "THEN PICK YOUR WI-FI" },
         { &font_small, COL_GREY, 136, "AND TYPE YOUR CITY" },
-        { &font_small, COL_GREY, 200, "PRESS PWR TO CANCEL" },
     };
     for (auto &ln : lines) {
         lv_obj_t *l = uiLabel(s, ln.f, ln.c, 0, 0, ln.t);
         lv_obj_align(l, LV_ALIGN_TOP_MID, 0, ln.y);
     }
+    wifiStatus = uiLabel(s, &font_small, COL_WARN, 0, 0, "");
+    lv_obj_align(wifiStatus, LV_ALIGN_TOP_MID, 0, 168);
     return wifiRefresh;
 }

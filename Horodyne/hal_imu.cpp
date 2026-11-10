@@ -3,9 +3,9 @@
 #include <Wire.h>
 #include <ImuDrv.hpp>   // SensorLib 0.5
 
-// Which QMI8658 interrupt line reaches GPIO38. Waveshare's docs name both INT1
-// and INT2 for it; if raise-to-wake never fires, change this to PIN1.
-#define IMU_WAKE_PIN SensorQMI8658::IntPin::PIN2
+// The QMI8658 interrupt line that reaches GPIO38: INT1. Waveshare's docs name both. Tested 2026-11-11:
+// with motion on INT2 the chip flagged motion in STATUS1 but GPIO38 never moved; enabling INT1 drives it.
+#define IMU_WAKE_PIN SensorQMI8658::IntPin::PIN1
 
 static const uint8_t REG_CTRL8 = 0x09, REG_STATUS1 = 0x2F;
 
@@ -23,14 +23,10 @@ static void regWrite(uint8_t r, uint8_t v) {
     Wire.beginTransmission(ADDR_IMU); Wire.write(r); Wire.write(v); Wire.endTransmission();
 }
 
-// The chip's own pedometer never counts on this board (four walk tests 2026-10-26, and Waveshare
-// issue #109), so steps are counted in software (svc_activity.cpp) from samples the chip buffers
-// in its FIFO. The any-motion detector runs alongside for raise-to-wake. Configured once, all day.
-bool imuBegin() {
-    pinMode(PIN_IMU_INT, INPUT_PULLUP);
-    if (!imu.begin(Wire, ADDR_IMU, PIN_I2C_SDA, PIN_I2C_SCL)) return false;
-    // Accel-only ODR code 8 = 31.25 Hz; SensorLib's table names that code by its 6DOF rate, 28 Hz.
-    bool acc = imu.configAccel(AccelFullScaleRange::FS_4G, 28.0f) && imu.enableAccel();
+// Any-motion for raise-to-wake. Must run after configFifo(): setting up the FIFO stops the motion
+// engine (STATUS1 stayed 0 through a minute of shaking, 2026-11-11), so it runs again after every
+// FIFO restart. It leaves the FIFO running.
+static bool startMotion() {
     bool mot = imu.configMotionDetect(SensorQMI8658::MotionType::ANY_MOTION,
                                       WOM_THRESHOLD_MG, WOM_THRESHOLD_MG, WOM_THRESHOLD_MG, 4)
             && imu.enableMotionDetect(IMU_WAKE_PIN);
@@ -41,9 +37,21 @@ bool imuBegin() {
         if (regRead(REG_CTRL8, c8)) regWrite(REG_CTRL8, c8 & ~0x40);
         else mot = false;
     }
+    return mot;
+}
+
+// The chip's own pedometer never counts on this board (four walk tests 2026-10-26, and Waveshare
+// issue #109), so steps are counted in software (svc_activity.cpp) from samples the chip buffers
+// in its FIFO. The any-motion detector runs alongside for raise-to-wake. Configured once, all day.
+bool imuBegin() {
+    pinMode(PIN_IMU_INT, INPUT_PULLUP);
+    if (!imu.begin(Wire, ADDR_IMU, PIN_I2C_SDA, PIN_I2C_SCL)) return false;
+    // Accel-only ODR code 8 = 31.25 Hz; SensorLib's table names that code by its 6DOF rate, 28 Hz.
+    bool acc = imu.configAccel(AccelFullScaleRange::FS_4G, 28.0f) && imu.enableAccel();
     // Stream mode keeps the newest 128 samples (~4 s): the sleeping watch drains it every STEP_POLL_MS.
     bool fifo = imu.configFifo(SensorQMI8658::FifoMode::STREAM, SensorQMI8658::FifoSamples::SAMPLES_128);
     imu.disableGyro();
+    bool mot = startMotion();
     Serial.printf("imu: accel %s, step fifo %s, motion wake %s\n",
                   acc ? "ok" : "FAILED", fifo ? "ok" : "FAILED", mot ? "ok" : "FAILED");
     ok = acc;
@@ -76,6 +84,20 @@ void imuArmWakeOnMotion() {
 
 void imuDisarmWakeOnMotion() {}
 
+// Move the watch between two of these: if STATUS1 shows motion but GPIO38 never changes,
+// the motion interrupt is on the other pin (IMU_WAKE_PIN).
+void imuDebugPrint() {
+    float x = 0, y = 0, z = 0;
+    bool got = imuReadAccel(x, y, z);
+    uint8_t c1 = 0, c8 = 0, s1 = 0;
+    bool regs = regRead(0x02, c1) && regRead(REG_CTRL8, c8);
+    int pin = digitalRead(PIN_IMU_INT);   // before STATUS1: reading it clears the latch
+    regs = regs && regRead(REG_STATUS1, s1);
+    Serial.printf("imu: %s, accel %s x=%.2f y=%.2f z=%.2f g, GPIO%d=%d, CTRL1=%02X CTRL8=%02X STATUS1=%02X%s\n",
+                  ok ? "ok" : "NOT STARTED", got ? "read" : "FAILED", x, y, z, PIN_IMU_INT, pin, c1, c8, s1,
+                  regs ? "" : " (register read FAILED)");
+}
+
 int imuReadSamples(float *g, int max) {
     if (!ok) return -1;
     static AccelerometerData d[128];
@@ -91,6 +113,7 @@ int imuReadSamples(float *g, int max) {
         imuRestarts++;
         imu.enableAccel();
         imu.configFifo(SensorQMI8658::FifoMode::STREAM, SensorQMI8658::FifoSamples::SAMPLES_128);
+        startMotion();   // the FIFO setup just stopped raise-to-wake
     }
     if (n > max) n = max;
     const float G = 9.80665f;

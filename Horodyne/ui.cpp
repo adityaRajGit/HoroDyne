@@ -11,6 +11,7 @@
 static ScreenId  cur = SCR_FACE;
 static ScreenId  backTarget = SCR_GRID;
 static ScreenId  lastApp = SCR_FACE;      // SCR_FACE = no app used yet
+static ScreenId  wifiFrom = SCR_SETTINGS; // where Wi-Fi setup was opened: swipe right goes back there
 uint8_t          uiStackIndex = 0;
 static UiRequest pending = REQ_NONE;
 static bool      syncing = false;
@@ -67,6 +68,7 @@ void uiGo(ScreenId id, lv_screen_load_anim_t anim) {
     hdrTime = nullptr;
     curRefresh = nullptr;
     lv_obj_t *s = uiScreen();
+    if (id == SCR_WIFI && cur != SCR_WIFI) wifiFrom = cur;
     cur = id;
     switch (id) {
         case SCR_FACE:     curRefresh = buildFace(s); break;
@@ -130,7 +132,8 @@ static void swipe(lv_dir_t d) {
         case SCR_GRID:
             if (d == LV_DIR_RIGHT) uiGoLater(SCR_FACE, LV_SCR_LOAD_ANIM_MOVE_RIGHT);
             break;
-        case SCR_WIFI:
+        case SCR_WIFI:   // swipe right cancels setup, like back anywhere else
+            if (d == LV_DIR_RIGHT) { uiRequest(REQ_PORTAL_CANCEL); uiGoLater(wifiFrom, LV_SCR_LOAD_ANIM_MOVE_RIGHT); }
             break;
         default:
             if (isApp(cur) && d == LV_DIR_RIGHT) uiGoLater(backTarget, LV_SCR_LOAD_ANIM_MOVE_RIGHT);
@@ -566,10 +569,7 @@ void uiShowChargeMe() {
 
 // ----- events from the main loop -------------------------------------------------------
 void uiOnPwr(PwrEvent e) {
-    if (cur == SCR_WIFI) {
-        if (e == PWR_CLICK) { uiRequest(REQ_PORTAL_CANCEL); uiGo(SCR_SETTINGS, LV_SCR_LOAD_ANIM_FADE_IN); }
-        return;
-    }
+    if (cur == SCR_WIFI) return;   // touch only: swipe right cancels (see "Touch first" in the spec)
     switch (e) {
         case PWR_CLICK:
             if (sheet)  { hideSheet(); return; }
@@ -612,7 +612,7 @@ void uiTick() {
 void uiSetSyncing(bool on) { syncing = on; }
 
 void uiPortalDone(bool ok) {
-    uiGo(ok ? SCR_FACE : SCR_SETTINGS, LV_SCR_LOAD_ANIM_FADE_IN);
+    uiGo(ok ? SCR_FACE : wifiFrom, LV_SCR_LOAD_ANIM_FADE_IN);
 }
 
 void uiSplash() {

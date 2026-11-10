@@ -10,6 +10,7 @@
 #include <ArduinoJson.h>
 #include <WiFiManager.h>
 #include <esp_wifi.h>
+#include <esp_heap_caps.h>
 
 Weather weather = {};
 static uint32_t lastSyncMs = 0;
@@ -17,6 +18,12 @@ static bool     lastSyncOk = false;
 static uint8_t  failCount = 0;    // failed syncs in a row
 
 static int8_t credsCached = -1;   // -1 = not checked yet
+static int8_t txQuarterDbm = WIFI_TX_QDBM;   // see config.h; "txp" over serial changes it until reboot
+
+// Call once the radio is on: the driver resets the power each time it starts.
+static void applyTxPower() {
+    WiFi.setTxPower((wifi_power_t)txQuarterDbm);
+}
 
 bool netHasCredentials() {
     if (credsCached < 0) {
@@ -142,6 +149,7 @@ static bool connect(uint32_t timeoutMs) {
     if (!batteryRadioOk()) return false;
     batteryRadio(true);
     WiFi.mode(WIFI_STA);
+    applyTxPower();
     WiFi.begin();   // credentials saved by the setup page
     uint32_t t0 = millis();
     while (WiFi.status() != WL_CONNECTED && millis() - t0 < timeoutMs) delay(100);
@@ -190,8 +198,23 @@ static WiFiManagerParameter cityParam("city", "City for weather", "", 39);
 static WiFiManagerParameter ghUserParam("ghuser", "GitHub username", "", 39);
 // Never echoed back to the page; left blank, the saved token stays.
 static WiFiManagerParameter ghTokenParam("ghtoken", "GitHub read-only token (blank keeps the saved one)", "", 127, "type=\"password\"");
+static const char SETUP_SSID[] = "HORODYNE-SETUP";
 static bool     portalSaved = false;
+static bool     portalStarted = false;   // between netPortalStart() and netPortalStop()
 static uint32_t portalStartMs = 0;
+
+// The setup network is on the air: the portal runs and the AP broadcasts our name.
+static bool portalOnAir() {
+    return wm.getConfigPortalActive() && (WiFi.getMode() & WIFI_AP) && WiFi.softAPSSID() == SETUP_SSID;
+}
+
+static void logPortal(const char *what) {
+    Serial.printf("net: setup network %s: mode %d, ssid '%s', channel %d, ip %s, tx %d, internal heap %u\n", what,
+                  (int)WiFi.getMode(), WiFi.softAPSSID().c_str(), (int)WiFi.channel(), WiFi.softAPIP().toString().c_str(),
+                  (int)WiFi.getTxPower(), (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+}
+
+bool netPortalFailed() { return portalStarted && !portalOnAir(); }
 
 void netPortalStart() {
     cityParam.setValue(settings.city, 39);
@@ -204,7 +227,19 @@ void netPortalStart() {
     portalSaved = false;
     portalStartMs = millis();
     batteryRadio(true);
-    wm.startConfigPortal("HORODYNE-SETUP");
+    // In non-blocking mode startConfigPortal() returns false even when it works, so check the radio itself.
+    wm.startConfigPortal(SETUP_SSID);
+    applyTxPower();
+    if (!portalOnAir()) {
+        logPortal("did not start, retrying");   // once more, from the radio fully off
+        if (wm.getConfigPortalActive()) wm.stopConfigPortal();
+        WiFi.mode(WIFI_OFF);
+        delay(200);
+        wm.startConfigPortal(SETUP_SSID);
+        applyTxPower();
+    }
+    portalStarted = true;
+    logPortal(portalOnAir() ? "on air" : "FAILED");
 }
 
 int netPortalProcess() {
@@ -241,6 +276,34 @@ int netPortalProcess() {
 }
 
 void netPortalStop() {
-    wm.stopConfigPortal();
+    // WiFiManager's own 300 s timeout can shut the portal first; stopping it twice crashes on its freed web server.
+    if (wm.getConfigPortalActive()) wm.stopConfigPortal();
+    portalStarted = false;
     radioOff();
+}
+
+// ----- radio checks over serial --------------------------------------------------------
+void netDebugTxPower(int q) {
+    if (q < 8 || q > 84) { Serial.println("net: txp takes 8..84 quarter-dBm (34 = 8.5 dBm, 84 = 21 dBm)"); return; }
+    txQuarterDbm = q;
+    bool on = WiFi.getMode() != WIFI_OFF;
+    if (on) applyTxPower();
+    Serial.printf("net: tx power set to %d, radio %s%s\n", q, on ? "on, now " : "off", on ? String((int)WiFi.getTxPower()).c_str() : "");
+}
+
+void netDebugScan() {
+    bool wasOff = WiFi.getMode() == WIFI_OFF;
+    if (wasOff) { batteryRadio(true); WiFi.mode(WIFI_STA); applyTxPower(); }
+    int n = WiFi.scanNetworks();   // blocks ~2 s
+    Serial.printf("net: scan found %d networks\n", n);
+    for (int i = 0; i < n && i < 12; i++)
+        Serial.printf("net:   %4d dBm  ch %2d  %s\n", (int)WiFi.RSSI(i), (int)WiFi.channel(i), WiFi.SSID(i).c_str());
+    WiFi.scanDelete();
+    if (wasOff) radioOff();
+}
+
+void netDebugStatus() {
+    if (WiFi.getMode() == WIFI_OFF) { Serial.println("net: radio off"); return; }
+    Serial.printf("net: radio mode %d, ap '%s', channel %d, tx %d, sta %s\n", (int)WiFi.getMode(), WiFi.softAPSSID().c_str(),
+                  (int)WiFi.channel(), (int)WiFi.getTxPower(), WiFi.status() == WL_CONNECTED ? "connected" : "not connected");
 }

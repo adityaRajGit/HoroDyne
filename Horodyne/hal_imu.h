@@ -9,3 +9,4 @@ void     imuArmWakeOnMotion();                    // before light sleep
 void     imuDisarmWakeOnMotion();                 // after waking
 extern uint16_t imuRestarts;                      // times the FIFO had to be started again
 int      imuReadSamples(float *g, int max);       // buffered samples as |a| in g, oldest first; -1 = no IMU
+void     imuDebugPrint();                         // "imu" over serial: axes, wake line and motion registers

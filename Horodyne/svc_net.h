@@ -29,5 +29,11 @@ uint8_t  netFailCount();              // failed syncs in a row
 void netPortalStart();
 int  netPortalProcess();   // 0 = still open, 1 = saved and synced, -1 = timed out or failed
 void netPortalStop();
+bool netPortalFailed();    // started, but HORODYNE-SETUP isn't on the air (the serial log says why)
+
+// Radio checks from the serial port: "wstat", "wscan", "txp <8..84>".
+void netDebugStatus();
+void netDebugScan();
+void netDebugTxPower(int quarterDbm);   // also used for every later connect and setup page, until reboot
 
 const char *weatherCondition(int code);   // "CLEAR", "CLOUDY", ...

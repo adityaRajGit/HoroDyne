@@ -38,6 +38,7 @@ static uint32_t   lastTickMs = 0;
 static uint32_t   lastBattMs = 0;
 static uint32_t   raiseCooldownUntil = 0;
 static bool       lowWarned = false;
+static uint32_t   wakesTimer = 0, wakesRaise = 0, wakesRejected = 0, wakesOther = 0;   // since boot, for "s"
 static bool       lowPowerAuto = false;   // the battery turned Low Power Mode on, not the user
 static TaskHandle_t  netTask = nullptr;
 static volatile bool netBusy = false;     // the worker owns Wi-Fi until this clears
@@ -170,6 +171,7 @@ static void sleepUntilWake() {
         WakeReason why = powerLightSleep((uint64_t)timerMs * 1000ULL, imuWake, busy);
 
         if (why == WAKE_TIMER) {
+            wakesTimer++;
             if (countdown.state == CD_RUNNING && cdLeftMs() == 0) break;   // timer done: wake to ring
             netFinish();
             if (syncDue()) netStart(NET_SYNC);
@@ -189,10 +191,12 @@ static void sleepUntilWake() {
             bool up = imuFacingUp();
             while (!up && millis() - t0 < RAISE_SETTLE_MS) { delay(50); up = imuFacingUp(); }
             Serial.printf("wake: motion, %s\n", up ? "facing up" : "not facing up, back to sleep");
-            if (up) break;
+            if (up) { wakesRaise++; break; }
+            wakesRejected++;
             raiseCooldownUntil = millis() + RAISE_COOLDOWN_MS;   // walking, not looking
             continue;
         }
+        wakesOther++;
         break;          // touch, PWR, or anything else wakes the screen
     }
 
@@ -255,11 +259,26 @@ static void stepsRestore() {
 // The token is never printed, and lives in NVS rather than in the firmware image.
 void serialCommand(const char *line) {
     char user[40], token[128];
+    lastInputMs = millis();   // someone is at the serial port: don't let the screen time out under them
     if (!strcmp(line, "ghsync")) { uiRequest(REQ_GH_SYNC); return; }
+    int q;
+    if (!strcmp(line, "imu")) {
+        imuDebugPrint();
+        Serial.printf("imu: raise to wake is %s in Settings\n", settings.raiseToWake ? "on" : "off");
+        return;
+    }
+    if (!strcmp(line, "wstat"))  { netDebugStatus(); return; }
+    bool radioCmd = !strcmp(line, "wscan") || sscanf(line, "txp %d", &q) == 1;
+    if (radioCmd && netBusy)     { Serial.println("net: a sync has Wi-Fi, try again in a moment"); return; }
+    if (!strcmp(line, "wscan"))  { netDebugScan(); return; }
+    if (sscanf(line, "txp %d", &q) == 1) { netDebugTxPower(q); return; }
     if (!strcmp(line, "s")) {
         Serial.printf("steps: %lu today, %lu reads, %lu samples, %lu empty, %lu peaks, biggest swing %.3f g, %u FIFO restarts\n",
                       (unsigned long)activity.steps, (unsigned long)activityStats.updates, (unsigned long)activityStats.samples,
                       (unsigned long)activityStats.emptyReads, (unsigned long)activityStats.peaks, activityStats.maxSwing, imuRestarts);
+        Serial.printf("steps: up %lu s (reset reason %d), wakes: %lu timer, %lu raise, %lu motion rejected, %lu other\n",
+                      (unsigned long)(millis() / 1000), (int)esp_reset_reason(), (unsigned long)wakesTimer,
+                      (unsigned long)wakesRaise, (unsigned long)wakesRejected, (unsigned long)wakesOther);
         return;
     }
     if (sscanf(line, "gh %39s %127s", user, token) == 2 && ghValidLogin(user)) {
@@ -289,7 +308,7 @@ void setup() {
     settingsLoad();
     batteryBegin();
     batteryUpdate(true);
-    Serial.printf("horodyne: v%s.%d built %s\n", HORODYNE_VERSION, BUILD_NUMBER, BUILD_STAMP);
+    Serial.printf("horodyne: v%s.%d built %s, reset reason %d\n", HORODYNE_VERSION, BUILD_NUMBER, BUILD_STAMP, (int)esp_reset_reason());
     displayBegin();
     uiSplash();                   // covers the IMU setup and the 1 s RTC check below
     lv_refr_now(NULL);

@@ -46,13 +46,21 @@
 #define DOUBLE_CLICK_MS   300UL
 #define WDT_TIMEOUT_S     90UL                     // longer than the slowest sync, or a slow network reboots the watch
 
+// ----- Wi-Fi -------------------------------------------------------------
+// Transmit power in 0.25 dBm steps. At the driver's default of 20 dBm this board's signal can't be
+// decoded even from half a metre away (no HORODYNE-SETUP, no joining the router); 13 dBm was heard
+// at full strength in every scan. Try other values over serial with "txp <8..84>" and "wstat".
+#define WIFI_TX_QDBM      52
+
 // ----- Raise to wake -----------------------------------------------------
 // Which accelerometer axis points out of the screen, and its sign when the
 // screen faces up. Measured 2026-10-13: flat, face up, Level logs "imu z=-0.97".
 #define IMU_FACE_AXIS      2      // 0 = x, 1 = y, 2 = z
 #define IMU_FACE_SIGN      -1
 #define RAISE_MIN_G        0.55f  // facing-up component needed to accept a wake
-#define WOM_THRESHOLD_MG   200    // wake-on-motion sensitivity
+// Wake-on-motion sensitivity: the change between two samples (31 Hz) that has to hold for 4 samples,
+// in steps of 31.25 mg. 200 only fired on hard shaking (one wake in two minutes of raises, 2026-11-11).
+#define WOM_THRESHOLD_MG   62.5f
 #define RAISE_COOLDOWN_MS  1500UL // ignore motion this long after a rejected wake
 #define RAISE_SETTLE_MS    400UL  // keep checking this long after motion starts: the wrist is still turning
 
