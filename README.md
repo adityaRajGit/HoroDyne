@@ -239,7 +239,7 @@ Serial runs at 115200 baud. Boot lines start with `horodyne:`, `imu:`, `rtc:` an
 
 ## Known issues
 
-- **Step counting isn't reliable.** Counts have been missing on the development watch and the root cause hasn't been found. The motion sensor's built-in pedometer never counted on this board either, so steps are detected in software.
+- **Step counting hasn't been checked on long walks.** Steps are detected in software, because the motion sensor's built-in pedometer never counted on this board. Several causes of missing steps were fixed in November 2026, and a short walk now counts, but accuracy against a known count hasn't been measured. Handling the watch can add a few steps. See [the step counting spec](docs/superpowers/specs/2026-11-11-step-counting-design.md).
 - **Battery percentage is an estimate.** The charger's status pin isn't connected, so charging is inferred from voltage, and the discharge curve was tuned on one cell. Yours may read differently.
 - **Battery life hasn't been measured.**
 - **The clock chip doesn't tick on one of the development boards.** The firmware falls back to NTP and needs Wi-Fi for the correct time after a restart.

@@ -60,6 +60,13 @@ All text in Unica One; content kept ≥ 14 px from the sides; tap targets ≥ 52
 - In an app: swipe right = back; PWR = face; PWR double-press = last app; hold PWR = power-off sheet.
 - Woken after > 2 min asleep → face; shorter → previous screen.
 - No left/right swipe on the face in v1 (reserved for more faces).
+- Wi-Fi setup: swipe right cancels it and returns to the screen it was opened from. PWR does nothing there. Changed 2026-11-11; it used to be "press PWR to cancel".
+
+**Touch first (decided 2026-11-11).** The watch should depend on its button as little as possible:
+
+- Every screen works by touch alone, and back is always swipe right. New screens and flows don't use PWR, and no screen says "press PWR to …".
+- PWR is kept for the few jobs touch can't do well: waking the screen, the power-off sheet (hold PWR), and silencing the alarm. Existing PWR shortcuts (face → app grid, double-press → last app, PWR in an app → face) may stay as shortcuts, but each needs a touch way to do the same thing.
+- Still PWR-only, to move to touch: opening the app grid from the face.
 
 ## 6. Visual system
 
@@ -82,10 +89,12 @@ Icons: 2 px line icons drawn with LVGL primitives or a small icon font. Transiti
 
 States: Active → Dim (after timeout) → Sleep (2 s later) → Active (raise/touch/PWR); Sleep → Sync (6 h timer) → Sleep; Off via PWR hold or 3 % battery.
 
-Sleep: backlight 0, panel `SLPIN`, touch in its own standby with INT armed, IMU in normal mode (125 Hz accel) with pedometer + any-motion running
-(wake-on-motion mode was dropped: the QMI8658 stops counting steps in it),
-ESP32-S3 light sleep with GPIO wake on 14, 38, 40 and timer wake for the next sync. Raise-to-wake is accepted only if the
-screen faces up; otherwise back to sleep in < 50 ms, with a cooldown after rejected wakes.
+Sleep: backlight 0, panel `SLPIN`, touch in its own standby with INT armed, IMU accelerometer at 31.25 Hz feeding the step FIFO
+with the any-motion engine on INT1 (wake-on-motion mode was dropped: the QMI8658 stops counting steps in it),
+ESP32-S3 light sleep with GPIO wake on 14, 38, 40 and timer wakes (steps every 3 s, the next sync, the countdown).
+Raise to wake is accepted only if the screen faces up, with a cooldown after rejected wakes.
+Full design, coding decisions and test record: [raise to wake](2026-11-11-raise-to-wake-design.md). Updated 2026-11-11:
+this paragraph used to describe 125 Hz with the chip's pedometer.
 
 Low Power Mode (manual, or automatic at 10 %): brightness ≤ 40 %, no animations, no weather fetch, NTP every 12 h.
 
@@ -105,8 +114,8 @@ Low Power Mode (manual, or automatic at 10 %): brightness ≤ 40 %, no animation
 
 Three layers; UI reads services only, never hardware.
 
-- `hal_*`: display (LovyanGFX landscape, backlight, panel sleep, LVGL flush), touch (CST816T), imu (QMI8658 accel, pedometer, any-motion wake), battery, power (SYS_EN, PWR events, light sleep).
-- `svc_*`: clock (NTP, TZ, schedule, drift log), weather (Open-Meteo, cached), activity (daily steps, midnight reset, 2-h bins), settings (NVS).
+- `hal_*`: display (LovyanGFX landscape, backlight, panel sleep, LVGL flush), touch (CST816T), imu (QMI8658 accel, step FIFO, any-motion wake on INT1), battery, power (SYS_EN, PWR events, light sleep).
+- `svc_*`: clock (NTP, TZ, schedule, drift log), weather (Open-Meteo, cached), activity (daily steps counted in software from the IMU FIFO, midnight reset, 2-h bins; see the [step counting spec](2026-11-11-step-counting-design.md)), settings (NVS).
 - `ui_*`: theme (colors, fonts), nav (screen manager, gestures, back stack, PWR routing), one file per screen.
 - Main sketch: power state machine and LVGL loop.
 
@@ -128,6 +137,7 @@ desktop Arduino IDE 2, Cloud editor with a small custom `lv_conf` library import
 - Clock drift without RTC (measure; adapt sync interval; try RTC STOP-bit fix).
 - Battery connector type/polarity.
 - Sleep current above estimate (measure first).
-- Raise-to-wake false triggers (orientation check, cooldown, setting).
+- Raise-to-wake false triggers (orientation check, cooldown, setting). See the [raise to wake spec](2026-11-11-raise-to-wake-design.md) §7.
+- Step counts: handling and vibration can count as steps, and accuracy over long walks hasn't been measured. See the [step counting spec](2026-11-11-step-counting-design.md) §10.
 - Unica One legibility (≥ 16 px, capitals, letter-spacing; verify ° and %).
 - Landscape panel offset (verify with corner test pattern).
